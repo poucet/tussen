@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# tools/tussen — build and run the hub with the repo's hub.toml.
+#
+#   tools/tussen run [run args…]   build, start the hub, print the console URL and the OSC
+#                                  endpoint, open the console; Ctrl-C stops it
+#   tools/tussen [run args…]       same as run, e.g. tools/tussen --fake-midi --fake-pad
+#   tools/tussen build             build the hub (release)
+#   tools/tussen hub <args…>       build, then any tussen-hub command, e.g. hub list
+#   tools/tussen help              this text
+#
+# Run args pass through to `tussen-hub run`: --fake-midi, --fake-pad (no hardware needed),
+# --audio-device <name>, --config <path>. TUSSEN_NO_OPEN=1 skips opening the console.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HUB="$ROOT/hub/target/release/tussen-hub"
+
+die() { echo "tussen: $*" >&2; exit 1; }
+
+build_hub() {
+  command -v cargo >/dev/null || die "cargo not found; install Rust from https://rustup.rs"
+  (cd "$ROOT/hub" && cargo build --release --quiet)
+}
+
+# The hub config in use: --config <path> from the args, else the repo's hub.toml.
+hub_config() {
+  local cfg="$ROOT/hub.toml" prev=""
+  for a in "$@"; do [ "$prev" = "--config" ] && cfg="$a"; prev="$a"; done
+  echo "$cfg"
+}
+
+# `key` from `[section]` of a TOML file (first match; plain `key = value` lines only).
+toml_get() {
+  awk -v s="[$2]" -v k="$3" '
+    /^\[/ { in_s = ($1 == s) }
+    in_s && $1 == k && $2 == "=" { print $3; exit }' "$1" 2>/dev/null
+}
+
+lan_ip() {
+  ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null ||
+    { hostname -I 2>/dev/null | awk '{print $1}'; } || true
+}
+
+# Wait for the hub, then print where to reach it. Sets CONSOLE_URL (empty if disabled).
+announce() {
+  local cfg port osc lan
+  cfg="$(hub_config "$@")"
+  port="$(toml_get "$cfg" console port)"; port="${port:-9098}"
+  osc="$(toml_get "$cfg" osc listen_port)"; osc="${osc:-9000}"
+  lan="$(lan_ip)"; lan="${lan:-?}"
+  CONSOLE_URL=""
+  if [ "$(toml_get "$cfg" console enabled)" = "false" ]; then
+    echo "tussen hub console → disabled in $cfg"
+  else
+    for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+    CONSOLE_URL="http://127.0.0.1:$port"
+    echo "tussen hub console → $CONSOLE_URL"
+  fi
+  echo "hub OSC            → $lan:$osc  (local: 127.0.0.1:$osc)"
+}
+
+open_console() {
+  [ -n "$CONSOLE_URL" ] && [ -z "${TUSSEN_NO_OPEN:-}" ] || return 0
+  if command -v open >/dev/null; then open "$CONSOLE_URL"
+  elif command -v xdg-open >/dev/null; then xdg-open "$CONSOLE_URL" >/dev/null 2>&1
+  fi
+}
+
+run_hub() {
+  (cd "$ROOT" && exec "$HUB" run "$@") &
+  HUB_PID=$!
+  trap 'kill "$HUB_PID" 2>/dev/null; wait "$HUB_PID" 2>/dev/null; echo "hub stopped"' EXIT
+  trap 'exit 130' INT TERM
+  announce "$@"
+  open_console
+  wait "$HUB_PID"
+}
+
+cmd="${1:-help}"
+case "$cmd" in -h|--help) ;; --*) cmd=run ;; *) [ $# -gt 0 ] && shift ;; esac
+case "$cmd" in
+  run)   build_hub; run_hub "$@" ;;
+  build) build_hub; echo "built $HUB" ;;
+  hub)   build_hub; cd "$ROOT" && exec "$HUB" "$@" ;;
+  help|-h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command '$cmd' (try: tools/tussen help)" ;;
+esac
