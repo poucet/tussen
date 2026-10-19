@@ -22,9 +22,14 @@ enum Command {
         /// The hub config. Default: the user config
         /// ($XDG_CONFIG_HOME/tussen/hub.toml, else ~/.config/tussen/hub.toml),
         /// else the nearest `hub.toml` in the current directory or a parent
-        /// (the repo's shipped example; console Save then writes the user config).
+        /// (the repo's shipped example), else that example built in. From
+        /// either example, console Save writes the user config.
         #[arg(long)]
         config: Option<PathBuf>,
+        /// Print a stats line every second (devices, msgs in/out, audio,
+        /// drops). Off by default: problems are warned about on their own.
+        #[arg(long)]
+        stats: bool,
         /// Publish deterministic random CCs and notes instead of opening
         /// MIDI ports — testing without hardware.
         #[arg(long = "fake-midi")]
@@ -106,7 +111,8 @@ enum Command {
 
 #[derive(Subcommand)]
 enum ConfigAction {
-    /// Print the config `run` would use and where it came from (--config, user, repo).
+    /// Print the config `run` would use and where it came from (--config,
+    /// user, repo, or the built-in example).
     Path {
         #[arg(long)]
         config: Option<PathBuf>,
@@ -119,9 +125,9 @@ enum ConfigAction {
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match Cli::parse().command {
-        Command::Run { config, fake_midi, fake_pad, audio_device } => {
+        Command::Run { config, stats, fake_midi, fake_pad, audio_device } => {
             let config = ConfigFile::resolve(config, &Env::from_process()?)?;
-            cmd::run::run(config, fake_midi, fake_pad, audio_device.as_deref())
+            cmd::run::run(config, fake_midi, fake_pad, audio_device.as_deref(), stats)
         }
         Command::Monitor { port, filter } => cmd::monitor::run(port, filter.as_deref()),
         Command::FakeDevice { name, pattern, hub } => cmd::fake_device::run(&name, pattern, &hub),

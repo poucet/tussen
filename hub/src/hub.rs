@@ -65,8 +65,10 @@ impl Drop for Hub {
 
 /// Bind the OSC port, start the loop. `generated` is the channel the
 /// generators publish into; pass a channel with no senders
-/// left alive if there are none. With `quiet` the per-second stats line
-/// is suppressed (tests).
+/// left alive if there are none. Without `quiet` the loop prints a
+/// stats line every second (`tussen-hub run --stats`); either way it
+/// warns, at most once a minute, when something is going wrong
+/// ([`Trouble`]).
 pub fn spawn(config: Config, generated: Receiver<Message>, quiet: bool) -> anyhow::Result<Hub> {
     spawn_with(config, generated, quiet, Extras::default())
 }
@@ -198,6 +200,92 @@ struct Stats {
     send_errors: u64,
     dropped_at_last_report: u64,
     audio_at_last_report: u64,
+    trouble: TroubleLog,
+}
+
+/// The counters that mean something is wrong, as running totals.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Trouble {
+    /// Packets the listener could not parse.
+    malformed: u64,
+    /// Delivery rounds where a send failed.
+    send_errors: u64,
+    /// Audio packets lost to a full queue.
+    audio_overflows: u64,
+    /// Messages a full delay line dropped.
+    delay_drops: u64,
+    /// Console events dropped because a page fell behind.
+    console_drops: u64,
+}
+
+impl Trouble {
+    fn counts(&self) -> [(u64, &'static str); 5] {
+        [
+            (self.malformed, "malformed packet(s)"),
+            (self.send_errors, "failed send round(s)"),
+            (self.audio_overflows, "audio overflow(s)"),
+            (self.delay_drops, "delay-line drop(s)"),
+            (self.console_drops, "console drop(s)"),
+        ]
+    }
+
+    /// What grew from `last` to `self`. A total that shrank (a delay
+    /// line removed with its count) restarted from zero.
+    fn since(&self, last: &Trouble) -> Trouble {
+        let d = |now: u64, then: u64| if now >= then { now - then } else { now };
+        Trouble {
+            malformed: d(self.malformed, last.malformed),
+            send_errors: d(self.send_errors, last.send_errors),
+            audio_overflows: d(self.audio_overflows, last.audio_overflows),
+            delay_drops: d(self.delay_drops, last.delay_drops),
+            console_drops: d(self.console_drops, last.console_drops),
+        }
+    }
+
+    fn add(&mut self, o: &Trouble) {
+        self.malformed += o.malformed;
+        self.send_errors += o.send_errors;
+        self.audio_overflows += o.audio_overflows;
+        self.delay_drops += o.delay_drops;
+        self.console_drops += o.console_drops;
+    }
+
+    /// `3 malformed packet(s), 1 failed send round(s)`; `None` if all zero.
+    fn describe(&self) -> Option<String> {
+        let parts: Vec<String> =
+            self.counts().iter().filter(|(n, _)| *n > 0).map(|(n, what)| format!("{n} {what}")).collect();
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+}
+
+/// How often a persisting problem is repeated.
+const TROUBLE_EVERY: Duration = Duration::from_secs(60);
+
+/// Turns [`Trouble`] totals into rare warnings: the first growth at once,
+/// then whatever piled up, at most every [`TROUBLE_EVERY`].
+#[derive(Debug, Default)]
+struct TroubleLog {
+    last: Trouble,
+    pending: Trouble,
+    warned: Option<Instant>,
+}
+
+impl TroubleLog {
+    fn tick(&mut self, totals: Trouble, now: Instant) -> Option<String> {
+        self.pending.add(&totals.since(&self.last));
+        self.last = totals;
+        if self.warned.is_some_and(|w| now.duration_since(w) < TROUBLE_EVERY) {
+            return None;
+        }
+        let what = self.pending.describe()?;
+        let window = match self.warned {
+            Some(w) => format!("in the last {} s", now.duration_since(w).as_secs()),
+            None => "since start".into(),
+        };
+        self.pending = Trouble::default();
+        self.warned = Some(now);
+        Some(format!("{what} {window} (tussen-hub run --stats shows the per-second counts)"))
+    }
 }
 
 /// The router loop's state: routing, the live sync state, the delay
@@ -523,6 +611,16 @@ impl Loop {
 
     fn report(&mut self, elapsed: Duration, dropped: u64, quiet: bool) {
         let secs = elapsed.as_secs_f64();
+        let totals = Trouble {
+            malformed: dropped,
+            send_errors: self.stats.send_errors,
+            audio_overflows: self.audio.as_ref().map_or(0, |a| a.overflows.load(Ordering::Relaxed)),
+            delay_drops: self.lines.values().map(|l| l.dropped).sum(),
+            console_drops: self.console.as_ref().map_or(0, |c| c.link.tap.dropped()),
+        };
+        if let Some(w) = self.stats.trouble.tick(totals, Instant::now()) {
+            log::warn!("hub: {w}");
+        }
         let stats = &mut self.stats;
         if !quiet {
             let audio_stats = self
@@ -602,5 +700,36 @@ fn sync_rtp_targets(audio: Option<&AudioLink>, router: &Router, sync: &SyncState
         if let Ok(mut targets) = a.targets.lock() {
             *targets = list;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trouble_warns_at_once_then_at_most_once_a_minute() {
+        let t0 = Instant::now();
+        let mut log = TroubleLog::default();
+        let at = |s: u64| t0 + Duration::from_secs(s);
+        // All quiet: nothing.
+        assert_eq!(log.tick(Trouble::default(), at(1)), None);
+        // The first problem: at once.
+        let w = log.tick(Trouble { malformed: 3, ..Trouble::default() }, at(2)).unwrap();
+        assert!(w.starts_with("3 malformed packet(s) since start"), "{w}");
+        // More within the minute: held back, then summed.
+        assert_eq!(log.tick(Trouble { malformed: 5, send_errors: 1, ..Trouble::default() }, at(10)), None);
+        assert_eq!(log.tick(Trouble { malformed: 6, send_errors: 1, ..Trouble::default() }, at(30)), None);
+        let w = log.tick(Trouble { malformed: 6, send_errors: 1, ..Trouble::default() }, at(62)).unwrap();
+        assert!(w.starts_with("3 malformed packet(s), 1 failed send round(s) in the last 60 s"), "{w}");
+        // Quiet again: nothing, however long.
+        assert_eq!(log.tick(Trouble { malformed: 6, send_errors: 1, ..Trouble::default() }, at(500)), None);
+    }
+
+    #[test]
+    fn a_shrinking_total_counts_from_zero() {
+        let last = Trouble { delay_drops: 9, ..Trouble::default() };
+        assert_eq!(Trouble { delay_drops: 2, ..Trouble::default() }.since(&last).delay_drops, 2);
+        assert_eq!(Trouble::default().describe(), None);
     }
 }

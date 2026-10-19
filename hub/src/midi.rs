@@ -433,7 +433,9 @@ fn rescan(
     for gone in open_names.iter().filter(|n| !matched.contains(n)) {
         log::info!("midi: port gone: {gone}");
     }
-    for new in matched.iter().filter(|n| !open_names.contains(n)) {
+    // Nothing open yet: the `listening on` line below names them all.
+    let first = open_names.is_empty();
+    for new in matched.iter().filter(|n| !first && !open_names.contains(n)) {
         log::info!("midi: port found: {new}");
     }
 
@@ -471,7 +473,8 @@ fn rescan(
     }
     opened.sort();
     if !opened.is_empty() {
-        log::info!("midi: listening on {}", opened.join(", "));
+        let level = if first { log::Level::Info } else { log::Level::Debug };
+        log::log!(level, "midi: listening on {}", opened.join(", "));
     }
     *open_names = matched;
 }

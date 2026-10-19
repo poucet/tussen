@@ -280,6 +280,25 @@ port = 9098                  # loopback only
     }
 
     #[test]
+    fn save_from_the_built_in_example_goes_to_the_user_config() {
+        use crate::config_file::{tests::scratch, Env, Source, SHIPPED};
+        let root = scratch("save-builtin");
+        let env = Env { xdg_config_home: Some(root.join("xdg")), home: None, cwd: root.clone() };
+        let mut config = ConfigFile::resolve(None, &env).unwrap();
+        assert_eq!(config.source, Source::Builtin);
+        let mut state = SyncState::new(SyncConfig::default(), vec![]);
+        state.set_sync(Some(33), None);
+        let written = save_config(&mut config, &state).unwrap().to_path_buf();
+        assert_eq!(written, root.join("xdg/tussen/hub.toml"));
+        assert_eq!(config.source, Source::User);
+        let user = std::fs::read_to_string(&written).unwrap();
+        let first = SHIPPED.lines().next().unwrap();
+        assert!(user.starts_with(first), "lost the shipped comments:\n{user}");
+        assert_eq!(Config::load(&written).unwrap().sync.signal_delay_ms, 33);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn save_writes_the_file() {
         let dir = std::env::temp_dir().join(format!("tussen-save-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

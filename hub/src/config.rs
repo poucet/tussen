@@ -134,9 +134,17 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Config> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading config {}", path.display()))?;
-        let config: Config =
-            toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-        Ok(config)
+        Config::parse(&text, &path.display().to_string())
+    }
+
+    /// Parse config text; `origin` names it in the error.
+    pub fn parse(text: &str, origin: &str) -> anyhow::Result<Config> {
+        toml::from_str(text).with_context(|| format!("parsing {origin}"))
+    }
+
+    /// The config `file` names — its text, or the built-in example's.
+    pub fn from_file(file: &crate::config_file::ConfigFile) -> anyhow::Result<Config> {
+        Config::parse(&file.text()?, &file.to_string())
     }
 }
 

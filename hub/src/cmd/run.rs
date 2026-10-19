@@ -23,9 +23,10 @@ pub fn run(
     fake_midi: bool,
     fake_pad: bool,
     audio_device: Option<&str>,
+    stats: bool,
 ) -> anyhow::Result<()> {
-    log::info!("config: {config_file}");
-    let mut config = Config::load(&config_file.path)?;
+    let config_shown = config_file.to_string();
+    let mut config = Config::from_file(&config_file)?;
     if let Some(device) = audio_device {
         config.audio.device = device.to_owned();
     }
@@ -61,6 +62,7 @@ pub fn run(
     // and the hub runs without it — the console is a tool, not the show.
     let mut extras = hub::Extras::default();
     let mut _console = None;
+    let mut console_at = ConsoleAt::Disabled;
     if config.console.enabled {
         match console::start(ConsoleOptions {
             port: config.console.port,
@@ -73,9 +75,13 @@ pub fn run(
             Ok((c, router_side)) => {
                 let _ = audio_link.tap.set(Arc::clone(&c.tap));
                 extras.console = Some(router_side);
+                console_at = ConsoleAt::Up(c.addr);
                 _console = Some(c);
             }
-            Err(e) => log::warn!("console unavailable on 127.0.0.1:{}: {e:#}", config.console.port),
+            Err(e) => {
+                log::warn!("console unavailable on 127.0.0.1:{}: {e:#}", config.console.port);
+                console_at = ConsoleAt::Failed;
+            }
         }
     }
     gens.push(Box::new(AudioGenerator::new(config.audio.clone(), Arc::clone(&audio_link))));
@@ -89,7 +95,51 @@ pub fn run(
     drop(tx); // no senders left if there are no generators
 
     extras.audio = Some(audio_link);
-    let hub = hub::spawn_with(config, rx, false, extras)?;
+    let hub = hub::spawn_with(config, rx, !stats, extras)?;
+    let osc_port = hub.addr().port();
+    print!("{}", banner(console_at, osc_port, &console::osc_endpoint(osc_port).ips, &config_shown));
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
     hub.join();
     Ok(())
+}
+
+/// Where the console ended up, for the banner.
+#[derive(Clone, Copy, Debug)]
+enum ConsoleAt {
+    Up(std::net::SocketAddr),
+    Disabled,
+    Failed,
+}
+
+/// The startup banner: plain stdout, after the log lines, saying where
+/// to reach the hub. `lan` is the console's own LAN-IP answer
+/// ([`console::osc_endpoint`]); empty prints `?`.
+fn banner(console: ConsoleAt, osc_port: u16, lan: &[String], config: &str) -> String {
+    let console = match console {
+        ConsoleAt::Up(a) => format!("http://127.0.0.1:{}", a.port()),
+        ConsoleAt::Disabled => "disabled ([console] enabled = false)".into(),
+        ConsoleAt::Failed => "unavailable (see the warning above)".into(),
+    };
+    let lan = lan.first().map_or("?", String::as_str);
+    format!(
+        "\n  tussen hub console → {console}\n  hub OSC            → {lan}:{osc_port} (local: 127.0.0.1:{osc_port})\n  config             → {config}\n\n"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_banner_says_where_to_reach_the_hub() {
+        let b = banner(ConsoleAt::Up("127.0.0.1:9098".parse().unwrap()), 9000, &["10.0.0.5".into()], "/c/hub.toml (user)");
+        assert!(b.contains("tussen hub console → http://127.0.0.1:9098\n"), "{b}");
+        assert!(b.contains("hub OSC            → 10.0.0.5:9000 (local: 127.0.0.1:9000)\n"), "{b}");
+        assert!(b.contains("config             → /c/hub.toml (user)\n"), "{b}");
+        let b = banner(ConsoleAt::Disabled, 9000, &[], "x");
+        assert!(b.contains("console → disabled"), "{b}");
+        assert!(b.contains("OSC            → ?:9000"), "{b}");
+        assert!(banner(ConsoleAt::Failed, 1, &[], "x").contains("unavailable"));
+    }
 }

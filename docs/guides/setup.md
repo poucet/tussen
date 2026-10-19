@@ -46,8 +46,8 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    output still plays). `""` taps the default output — fine on one machine,
    where the music software plays locally. With a mixer, name the
    interface, or a loopback device carrying its input.
-2. **Edit your config** — `tussen-hub config init` copies the repo's
-   `hub.toml` (the shipped example) to `~/.config/tussen/hub.toml`
+2. **Edit your config** — `./tussen config init` (or `tussen-hub config
+   init` once installed) copies the repo's `hub.toml` (the shipped example) to `~/.config/tussen/hub.toml`
    (`$XDG_CONFIG_HOME/tussen/hub.toml` if that is set), and the hub reads
    that file from then on; `tussen-hub config path` prints which file it
    would use. Three lines for a room, each with a commented example under
@@ -62,19 +62,21 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    The `djay` destination is OSC *into* djay Pro; point it at the DJ laptop
    or delete it. Use real names; a typo shows up as a resolve warning in
    the log.
-3. **Run it:** `./tussen` from the repo root. It builds the hub,
+3. **Run it:** `./tussen run` from the repo root. It builds the hub,
    starts it, prints the console URL and the OSC endpoint to hand to the
    music laptops, and opens the console (its top bar has a copy button for
-   the endpoint). Ctrl-C stops it. `./tussen --fake-midi` stands in
+   the endpoint). Ctrl-C stops it. `./tussen run --fake-midi` stands in
    for a MIDI controller; `--audio-device "<name>"` overrides `[audio]` for
-   one run.
+   one run. `./tussen install` puts `tussen-hub` in `~/.local/bin`, so
+   `tussen-hub run` works from anywhere — the same, minus opening the
+   browser.
 4. **First run on macOS:** allow incoming connections, and let the terminal
    record system audio. Dismissed it? System Settings ▸ Privacy & Security ▸
    *Screen & System Audio Recording* (*System Audio Recording Only*) → the
    terminal app, then restart the hub.
 5. **Check:** the start-up log names the capture (`audio: tapping output …`
-   or `audio: capturing input …`), and the stats line reads
-   `audio=187.5pkt/s` once anyone is listening. `tussen-hub listen --name me
+   or `audio: capturing input …`), and with `run --stats` the per-second
+   line reads `audio=187.5pkt/s` once anyone is listening. `tussen-hub listen --name me
    --audio` registers a throwaway device and prints the stream's peak level.
 6. **Link.** The hub never founds an Ableton Link session by itself. It
    starts *waiting* (the console's Link field says `Link: waiting`), with a
@@ -203,7 +205,7 @@ also why the room's `hub.toml` needs the visuals laptop's real name, not
 
 Open <http://127.0.0.1:9098> on the hub laptop. Changes apply at once;
 **Save** writes them into your config, comments kept — never into the
-repo: if the hub was running the repo's `hub.toml`, Save copies it to
+repo: if the hub was running the shipped example, Save copies it to
 `~/.config/tussen/hub.toml` first and uses that file from then on. To practise without a
 hub, open `hub/console/index.html?mock=1` (a fake hub whose MIDI leads its
 kicks by 70 ms; `&lead=<ms>` changes that).
@@ -229,7 +231,8 @@ The engine is never delayed: it makes the audio.
    device flashing on the same beat, raise the TD round trip until the two
    coincide on the device's screen. If that holds the device too far behind
    the room, flip its switch to *in time with the music*. Save.
-3. **Check:** the stats line shows `devices=<n>` and `audio=187.5pkt/s`;
+3. **Check:** with `run --stats`, the per-second line shows `devices=<n>`
+   and `audio=187.5pkt/s`;
    the visuals' audio input moves; every Link app shows 1+ peers.
 
 **Remapping** an address for one destination: wiggle the control (its

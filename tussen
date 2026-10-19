@@ -7,7 +7,10 @@
 #   ./tussen run …                    also opens the console in your browser
 #                                     (TUSSEN_NO_OPEN=1 skips it; the binary never does)
 #
+# Start the hub with `./tussen run` (bare `./tussen` prints the help).
 # Examples: ./tussen run · ./tussen run --fake-midi --fake-pad · ./tussen config init
+# The hub prints its console URL and OSC endpoint on start; `run --stats` adds
+# a counters line a second.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -53,12 +56,17 @@ for a in "$@"; do
   ARGS+=("$a"); prev="$a"
 done
 
-# The console's port from the config the hub will use (`tussen-hub config path`).
+# The console's port from the config the hub will use (`tussen-hub config path`:
+# `<file> (<source>)`, or `(built-in example; …)` — this checkout's hub.toml).
 console_url() {
   local flag=() prev="" cfg port
-  for a in "$@"; do [ "$prev" = "--config" ] && flag=(--config "$a"); prev="$a"; done
+  for a in "$@"; do
+    [ "$prev" = "--config" ] && flag=(--config "$a")
+    case "$a" in --config=*) flag=("$a") ;; esac
+    prev="$a"
+  done
   cfg="$(cd "$ROOT" && "$HUB" config path ${flag[@]+"${flag[@]}"} 2>/dev/null)" || return 0
-  cfg="${cfg% (*}"
+  case "$cfg" in "(built-in"*) cfg="$ROOT/hub.toml" ;; *) cfg="${cfg% (*}" ;; esac
   [ "$(toml_get "$cfg" console enabled)" = "false" ] && return 0
   port="$(toml_get "$cfg" console port)"
   echo "http://127.0.0.1:${port:-9098}"
@@ -87,5 +95,11 @@ build_hub
 case "${1:-}" in
   install) shift; install_hub "$@" ;;
   run)     open_console ${ARGS[@]+"${ARGS[@]}"}; cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;
+  ""|help|-h|--help)
+           rc=0; (cd "$ROOT" && "$HUB" ${ARGS[@]+"${ARGS[@]}"}) || rc=$?
+           echo
+           echo "./tussen adds: install [--prefix DIR] (tussen-hub into DIR/bin, default ~/.local/bin),"
+           echo "and run also opens the console in your browser (TUSSEN_NO_OPEN=1 skips it)."
+           exit "$rc" ;;
   *)       cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;
 esac

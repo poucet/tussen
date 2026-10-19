@@ -394,7 +394,7 @@ fn propose(link: &Link, cmd: LinkCmd) {
     let now = link.clock().now();
     match cmd {
         LinkCmd::Tempo(bpm) => {
-            log::info!("link: tempo → {bpm:.2} BPM");
+            log::debug!("link: tempo → {bpm:.2} BPM");
             link.propose_tempo(bpm, now);
         }
         LinkCmd::Playing(p) => {
@@ -424,7 +424,7 @@ fn command(link: &Link, private: &mut SessionState, started: &mut bool, cmd: Lin
         }
         _ if joined => propose(link, cmd),
         _ => {
-            log::info!("link: own beat (waiting) — {cmd:?}");
+            log::debug!("link: own beat (waiting) — {cmd:?}");
             apply_private(private, cmd, now);
         }
     }
@@ -471,12 +471,12 @@ fn run_link(link: &Link, config: &LinkConfig, cmds: &Receiver<LinkCmd>, tap: Opt
             logged_bpm = (beat.tempo(), Instant::now());
         }
         // A tempo the hub follows, at most twice a second while a DJ rides
-        // the fader.
+        // the fader — debug only: an hour of riding is not news.
         if state.joined()
             && (state.tempo() - logged_bpm.0).abs() >= 0.01
             && logged_bpm.1.elapsed() >= Duration::from_millis(500)
         {
-            log::info!("link: following {:.2} BPM", state.tempo());
+            log::debug!("link: following {:.2} BPM", state.tempo());
             logged_bpm = (state.tempo(), Instant::now());
         }
 

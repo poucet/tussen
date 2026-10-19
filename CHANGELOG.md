@@ -2,12 +2,29 @@
 
 ## Unreleased
 
+#### `./tussen run`, `tussen-hub` anywhere, and a quiet hub · 2026-10-20 00:18 · ntnkpssp
+
+- **`./tussen` is `tussen-hub`, built fresh from the checkout**: every command
+  and flag passes through. `./tussen run` starts the hub and opens the
+  console; `./tussen install` puts `tussen-hub` in `~/.local/bin`, and
+  `tussen-hub run` then works from any directory (no browser).
+- **Outside a checkout with no config of your own, the hub runs the shipped
+  example built into the binary.** `tussen-hub config path` says so; console
+  Save creates `~/.config/tussen/hub.toml` from it.
+- **On start the hub prints where to reach it**: console URL, OSC endpoint
+  (LAN and local), config. After that it logs only what changes or goes
+  wrong, so the URLs stay on screen.
+- **The per-second stats line is off by default**; `run --stats` brings it
+  back. Malformed packets, failed sends and dropped audio/delay/console
+  data get a warning instead, at most once a minute. Link tempo following
+  and console tempo changes moved to debug.
+
 #### Your hub config lives in ~/.config, not in the repo · 2026-10-20 00:02 · quplzywy
 
 - **The hub reads `~/.config/tussen/hub.toml`** (`$XDG_CONFIG_HOME/tussen/hub.toml`
   if set; macOS too) before the repo's `hub.toml`, which is now the shipped
   example and the fallback. Order: `--config`, your config, the repo's.
-  The startup log says which (`config: <path> (user)`).
+  The startup banner says which (`config → <path> (user)`).
 - **Console Save never writes into the repo.** Running on the repo's example,
   Save copies it (comments and all) to your config path, applies the edit
   there and uses that file from then on; the console's "saved →" shows it.

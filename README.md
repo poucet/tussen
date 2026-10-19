@@ -28,26 +28,37 @@ same signals the musicians play; bring any OSC consumer.
 ## Quick start
 
 ```sh
-cd hub && cargo build --release
-./target/release/tussen-hub config init    # copy hub.toml to ~/.config/tussen/hub.toml
-./target/release/tussen-hub run            # reads your config, else the repo's hub.toml
+./tussen config init    # copy hub.toml to ~/.config/tussen/hub.toml
+./tussen run            # build, start the hub, open the console
 ```
 
-Or, from the repo root, `./tussen` does both, then prints the console
-URL and the OSC endpoint and opens the console.
+`./tussen` builds `tussen-hub` from the checkout and passes every command
+and flag on to it (`./tussen --help`); `run` also opens the console in your
+browser. To use the hub outside the checkout, `./tussen install` puts
+`tussen-hub` in `~/.local/bin` (`--prefix DIR` for elsewhere); then
+`tussen-hub run` works from any directory, the same minus the browser.
+
+On start the hub prints where to reach it:
+
+```
+  tussen hub console → http://127.0.0.1:9098
+  hub OSC            → 192.168.1.20:9000 (local: 127.0.0.1:9000)
+  config             → /Users/you/.config/tussen/hub.toml (user)
+```
+
+After that it stays quiet unless something changes (a device joins or
+leaves, a Link session, a save) or goes wrong. `run --stats` adds a
+counters line every second.
 
 Your config lives in `~/.config/tussen/hub.toml` (`$XDG_CONFIG_HOME/tussen/`
 if set, macOS too), so you can edit it without touching the checkout. Until
-it exists the hub runs the repo's `hub.toml`, the shipped example, and the
-console's **Save** creates your file from it rather than writing into the
-repo. `tussen-hub config path` says which file the hub would use.
+it exists the hub runs the shipped example (the repo's `hub.toml`, or the
+copy built into `tussen-hub` outside a checkout), and the console's
+**Save** creates your file from it rather than writing into the repo.
+`tussen-hub config path` says which config the hub would use.
 
-No hardware needed to try it: `tussen-hub run --fake-midi --fake-pad` (or
-`./tussen --fake-midi --fake-pad`) invents a controller and a gamepad. The hub prints one stats line a second:
-
-```
-devices=1 in=420/s out=1130/s audio=187.5pkt/s audio_ovf=0 console_drop=0 malformed=0 send_errors=0
-```
+No hardware needed to try it: `./tussen run --fake-midi --fake-pad` invents
+a controller and a gamepad.
 
 Then:
 
@@ -109,8 +120,9 @@ commented. The short version:
 
 Which file: `--config <path>` if given, else your user config
 (`~/.config/tussen/hub.toml`, or under `$XDG_CONFIG_HOME`), else the nearest
-`hub.toml` up from the current directory — the repo's shipped example. The
-hub logs its pick at startup (`config: <path> (user)`). `--audio-device "<name>"` overrides
+`hub.toml` up from the current directory — the repo's shipped example —
+else that same example, built into `tussen-hub`. The startup banner names
+the pick (`config → <path> (user)`). `--audio-device "<name>"` overrides
 `[audio] device` for one run.
 
 ## The console
@@ -121,7 +133,7 @@ plus the anchored alignment strip for setting the signal delay by eye or by
 drag. Right: every address ever seen (direction, min/max, rate), remap rules,
 and the osc-traffic tab: a live scrolling feed of every message. **Save**
 writes the sync and remap state back into the config in use, comments
-intact — into your user config if the hub was running the repo's example (it
+intact — into your user config if the hub was running the shipped example (it
 copies the example there first, then uses that file).
 
 ## Reading the signals from your own code

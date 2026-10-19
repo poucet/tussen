@@ -289,7 +289,7 @@ pub struct ConsoleOptions {
     /// page next to the hub's LAN IP.
     pub osc_port: u16,
     /// The config file the hub was started with — where Save writes
-    /// (redirected to the user config if it is the repo's example).
+    /// (redirected to the user config if it is an example: repo or built-in).
     pub config: Option<ConfigFile>,
     /// Static destinations in config order, with their kinds.
     pub statics: Vec<(String, DestKind)>,
@@ -365,7 +365,7 @@ pub fn start(opts: ConsoleOptions) -> anyhow::Result<(Console, RouterConsole)> {
         let stop = Arc::clone(&stop);
         move || hub.run(&ev_rx, &ctl_rx, &inbox_rx, &stop)
     })?;
-    log::info!("console: http://{addr}");
+    log::debug!("console: http://{addr}"); // `run` prints it in its banner
     Ok((Console { addr, tap: Arc::clone(&tap), link_cmds: link_rx, stop }, RouterConsole { cmds: cmd_rx, tap }))
 }
 
