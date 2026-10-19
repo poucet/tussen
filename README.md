@@ -1,5 +1,7 @@
 # tussen-hub
 
+> tussen-hub is a [simply.audio lab](http://simply.audio) project.
+
 An OSC/MIDI/audio hub for live performance. One Rust process that:
 
 - **routes OSC by subscription** — everything sends to one port (:9000);
