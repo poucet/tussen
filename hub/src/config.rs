@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(config.osc.max_packet, 1200);
         assert_eq!(config.osc.device_timeout_ms, 3000);
         let names: Vec<&str> = config.dests.iter().map(|d| d.name.as_str()).collect();
-        assert_eq!(names, ["engine", "td"]);
+        assert_eq!(names, ["engine", "djay", "td"]);
         // The console defaults: no delays, no rules, loopback port 9098.
         assert_eq!(config.sync, crate::sync::SyncConfig::default());
         assert!(config.remap.is_empty());
@@ -160,10 +160,11 @@ mod tests {
         assert_eq!(config.console.port, 9098);
         use crate::sync::DestKind;
         let kinds: Vec<DestKind> = config.dests.iter().map(DestConfig::kind).collect();
-        assert_eq!(kinds, [DestKind::Engine, DestKind::Td]);
-        // TouchDesigner gets the audio stream; the engine does not.
+        // djay makes music too, so it is never delayed: an engine by kind.
+        assert_eq!(kinds, [DestKind::Engine, DestKind::Engine, DestKind::Td]);
+        // The visuals destination gets the audio stream; the music makers do not.
         let rtp: Vec<Option<u16>> = config.dests.iter().map(|d| d.rtp_port).collect();
-        assert_eq!(rtp, [None, Some(5006)]);
+        assert_eq!(rtp, [None, None, Some(5006)]);
         assert_eq!(config.link, crate::link::LinkConfig { tempo: 120.0, quantum: 4.0 });
     }
 
