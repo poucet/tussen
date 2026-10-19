@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# ./tussen [args…] — build the hub, start it, print the console URL and the OSC
-# endpoint, open the console; Ctrl-C stops it. The config is the hub's own pick
-# (`tussen-hub config path`): --config, else ~/.config/tussen/hub.toml (or
-# $XDG_CONFIG_HOME/tussen/hub.toml), else the repo's hub.toml.
+# ./tussen — tussen-hub, built fresh from this checkout. Every command and flag is
+# tussen-hub's own (`./tussen --help`), with two additions:
 #
-# Args pass through to `tussen-hub run`: --fake-midi, --fake-pad (no hardware needed),
-# --audio-device <name>, --config <path>. TUSSEN_NO_OPEN=1 skips opening the console.
-# Other hub commands: hub/target/release/tussen-hub --help.
+#   ./tussen install [--prefix DIR]   install tussen-hub into DIR/bin (default ~/.local/bin),
+#                                     so `tussen-hub …` does what `./tussen …` does
+#   ./tussen run …                    also opens the console in your browser
+#                                     (TUSSEN_NO_OPEN=1 skips it; the binary never does)
+#
+# Examples: ./tussen run · ./tussen run --fake-midi --fake-pad · ./tussen config init
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -19,12 +20,48 @@ build_hub() {
   (cd "$ROOT/hub" && cargo build --release --quiet)
 }
 
-# The hub config in use, as the hub resolves it: `<path> (<source>)` → `<path>`.
-hub_config() {
-  local flag=() prev="" line
+install_hub() {
+  local prefix="${PREFIX:-$HOME/.local}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --prefix) [ $# -ge 2 ] || die "--prefix needs a directory"; prefix="$2"; shift 2 ;;
+      --prefix=*) prefix="${1#--prefix=}"; shift ;;
+      *) die "install: unknown argument '$1' (usage: ./tussen install [--prefix DIR])" ;;
+    esac
+  done
+  local bin="$prefix/bin"
+  mkdir -p "$bin"
+  # Copy beside, then rename over: a running tussen-hub is never rewritten in place.
+  cp "$HUB" "$bin/.tussen-hub.new" && mv -f "$bin/.tussen-hub.new" "$bin/tussen-hub"
+  echo "installed $bin/tussen-hub"
+  case ":$PATH:" in
+    *":$bin:"*) ;;
+    *) local rc="~/.profile"
+       case "${SHELL:-}" in */zsh) rc="~/.zshrc" ;; */bash) rc="~/.bashrc" ;; esac
+       echo "$bin is not on your PATH; add this line to $rc:"
+       echo "  export PATH=\"$bin:\$PATH\"" ;;
+  esac
+}
+
+# Relative paths in the args are the caller's; the hub runs from the repo root
+# (where it finds the shipped hub.toml), so make --config absolute first.
+ARGS=()
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--config" ] && [ "${a#/}" = "$a" ]; then a="$PWD/$a"; fi
+  case "$a" in --config=*) v="${a#--config=}"; [ "${v#/}" = "$v" ] && a="--config=$PWD/$v" ;; esac
+  ARGS+=("$a"); prev="$a"
+done
+
+# The console's port from the config the hub will use (`tussen-hub config path`).
+console_url() {
+  local flag=() prev="" cfg port
   for a in "$@"; do [ "$prev" = "--config" ] && flag=(--config "$a"); prev="$a"; done
-  line="$(cd "$ROOT" && "$HUB" config path ${flag[@]+"${flag[@]}"})" || return 0
-  echo "${line% (*}"
+  cfg="$(cd "$ROOT" && "$HUB" config path ${flag[@]+"${flag[@]}"} 2>/dev/null)" || return 0
+  cfg="${cfg% (*}"
+  [ "$(toml_get "$cfg" console enabled)" = "false" ] && return 0
+  port="$(toml_get "$cfg" console port)"
+  echo "http://127.0.0.1:${port:-9098}"
 }
 
 # `key` from `[section]` of a TOML file (first match; plain `key = value` lines only).
@@ -34,45 +71,21 @@ toml_get() {
     in_s && $1 == k && $2 == "=" { print $3; exit }' "$1" 2>/dev/null
 }
 
-lan_ip() {
-  ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null ||
-    { hostname -I 2>/dev/null | awk '{print $1}'; } || true
-}
-
-# Wait for the hub, then print where to reach it. Sets CONSOLE_URL (empty if disabled).
-announce() {
-  local cfg port osc lan
-  cfg="$(hub_config "$@")"
-  port="$(toml_get "$cfg" console port)"; port="${port:-9098}"
-  osc="$(toml_get "$cfg" osc listen_port)"; osc="${osc:-9000}"
-  lan="$(lan_ip)"; lan="${lan:-?}"
-  CONSOLE_URL=""
-  if [ "$(toml_get "$cfg" console enabled)" = "false" ]; then
-    echo "tussen hub console → disabled in $cfg"
-  else
-    for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
-    CONSOLE_URL="http://127.0.0.1:$port"
-    echo "tussen hub console → $CONSOLE_URL"
-  fi
-  echo "hub OSC            → $lan:$osc  (local: 127.0.0.1:$osc)"
-}
-
+# Open the console once it answers, in the background, while the hub runs in front.
 open_console() {
-  [ -n "$CONSOLE_URL" ] && [ -z "${TUSSEN_NO_OPEN:-}" ] || return 0
-  if command -v open >/dev/null; then open "$CONSOLE_URL"
-  elif command -v xdg-open >/dev/null; then xdg-open "$CONSOLE_URL" >/dev/null 2>&1
-  fi
-}
-
-run_hub() {
-  (cd "$ROOT" && exec "$HUB" run "$@") &
-  HUB_PID=$!
-  trap 'kill "$HUB_PID" 2>/dev/null; wait "$HUB_PID" 2>/dev/null; echo "hub stopped"' EXIT
-  trap 'exit 130' INT TERM
-  announce "$@"
-  open_console
-  wait "$HUB_PID"
+  [ -z "${TUSSEN_NO_OPEN:-}" ] || return 0
+  local url; url="$(console_url "$@")"; [ -n "$url" ] || return 0
+  (
+    for _ in $(seq 100); do curl -s -o /dev/null "$url/" && break; sleep 0.1; done
+    if command -v open >/dev/null; then open "$url"
+    elif command -v xdg-open >/dev/null; then xdg-open "$url" >/dev/null 2>&1
+    fi
+  ) &
 }
 
 build_hub
-run_hub "$@"
+case "${1:-}" in
+  install) shift; install_hub "$@" ;;
+  run)     open_console ${ARGS[@]+"${ARGS[@]}"}; cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;
+  *)       cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;
+esac
