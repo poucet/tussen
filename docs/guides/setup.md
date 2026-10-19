@@ -46,7 +46,7 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    output still plays). `""` taps the default output — fine on one machine,
    where the music software plays locally. With a mixer, name the
    interface, or a loopback device carrying its input.
-2. **Edit your config** — `./tussen config init` (or `simply-tussen config
+2. **Edit your config** — `./simply-tussen config init` (or `simply-tussen config
    init` once installed) copies the repo's `hub.toml` (the shipped example) to `~/.config/tussen/hub.toml`
    (`$XDG_CONFIG_HOME/tussen/hub.toml` if that is set), and the hub reads
    that file from then on; `simply-tussen config path` prints which file it
@@ -62,12 +62,12 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    The `djay` destination is OSC *into* djay Pro; point it at the DJ laptop
    or delete it. Use real names; a typo shows up as a resolve warning in
    the log.
-3. **Run it:** `./tussen run` from the repo root. It builds the hub,
+3. **Run it:** `./simply-tussen run` from the repo root. It builds the hub,
    starts it, prints the console URL and the OSC endpoint to hand to the
    music laptops, and opens the console (its top bar has a copy button for
-   the endpoint). Ctrl-C stops it. `./tussen run --fake-midi` stands in
+   the endpoint). Ctrl-C stops it. `./simply-tussen run --fake-midi` stands in
    for a MIDI controller; `--audio-device "<name>"` overrides `[audio]` for
-   one run. `./tussen install` puts `simply-tussen` in `~/.local/bin`, so
+   one run. `./simply-tussen install` puts `simply-tussen` in `~/.local/bin`, so
    `simply-tussen run` works from anywhere — the same, minus opening the
    browser.
 4. **First run on macOS:** allow incoming connections, and let the terminal

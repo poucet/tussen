@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# ./tussen — simply-tussen, built fresh from this checkout. Every command and flag is
-# simply-tussen's own (`./tussen --help`), with two additions:
+# ./simply-tussen — simply-tussen, built fresh from this checkout. Every command and flag is
+# simply-tussen's own (`./simply-tussen --help`), with two additions:
 #
-#   ./tussen install [--prefix DIR]   install simply-tussen into DIR/bin (default ~/.local/bin),
-#                                     so `simply-tussen …` does what `./tussen …` does
-#   ./tussen run …                    also opens the console in your browser
-#                                     (TUSSEN_NO_OPEN=1 skips it; the binary never does)
+#   ./simply-tussen install [--prefix DIR]   install simply-tussen into DIR/bin (default ~/.local/bin),
+#                                            so `simply-tussen …` does what `./simply-tussen …` does
+#   ./simply-tussen run …                    also opens the console in your browser
+#                                            (TUSSEN_NO_OPEN=1 skips it; the binary never does)
 #
-# Start the hub with `./tussen run` (bare `./tussen` prints the help).
-# Examples: ./tussen run · ./tussen run --fake-midi --fake-pad · ./tussen config init
+# Start the hub with `./simply-tussen run` (bare `./simply-tussen` prints the help).
+# Examples: ./simply-tussen run · ./simply-tussen run --fake-midi --fake-pad · ./simply-tussen config init
 # The hub prints its console URL and OSC endpoint on start; `run --stats` adds
 # a counters line a second.
 set -euo pipefail
@@ -16,7 +16,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 HUB="$ROOT/hub/target/release/simply-tussen"
 
-die() { echo "tussen: $*" >&2; exit 1; }
+die() { echo "simply-tussen: $*" >&2; exit 1; }
 
 build_hub() {
   command -v cargo >/dev/null || die "cargo not found; install Rust from https://rustup.rs"
@@ -29,7 +29,7 @@ install_hub() {
     case "$1" in
       --prefix) [ $# -ge 2 ] || die "--prefix needs a directory"; prefix="$2"; shift 2 ;;
       --prefix=*) prefix="${1#--prefix=}"; shift ;;
-      *) die "install: unknown argument '$1' (usage: ./tussen install [--prefix DIR])" ;;
+      *) die "install: unknown argument '$1' (usage: ./simply-tussen install [--prefix DIR])" ;;
     esac
   done
   local bin="$prefix/bin"
@@ -98,7 +98,7 @@ case "${1:-}" in
   ""|help|-h|--help)
            rc=0; (cd "$ROOT" && "$HUB" ${ARGS[@]+"${ARGS[@]}"}) || rc=$?
            echo
-           echo "./tussen adds: install [--prefix DIR] (simply-tussen into DIR/bin, default ~/.local/bin),"
+           echo "./simply-tussen adds: install [--prefix DIR] (simply-tussen into DIR/bin, default ~/.local/bin),"
            echo "and run also opens the console in your browser (TUSSEN_NO_OPEN=1 skips it)."
            exit "$rc" ;;
   *)       cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;

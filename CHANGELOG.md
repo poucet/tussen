@@ -5,15 +5,15 @@
 #### The binary is `simply-tussen` · 2026-10-20 00:29 · rpklqlnu
 
 - **Renamed: `tussen-hub` → `simply-tussen`** — the command, the installed
-  binary (`./tussen install`), and the MIDI client name. Same commands and
+  binary (`./simply-tussen install`), and the MIDI client name. Same commands and
   flags. If you installed `tussen-hub` before, reinstall and delete the old
   one from `~/.local/bin`.
 
-#### `./tussen run`, `simply-tussen` anywhere, and a quiet hub · 2026-10-20 00:18 · ntnkpssp
+#### `./simply-tussen run`, `simply-tussen` anywhere, and a quiet hub · 2026-10-20 00:18 · ntnkpssp
 
-- **`./tussen` is `simply-tussen`, built fresh from the checkout**: every command
-  and flag passes through. `./tussen run` starts the hub and opens the
-  console; `./tussen install` puts `simply-tussen` in `~/.local/bin`, and
+- **`./simply-tussen` is `simply-tussen`, built fresh from the checkout**: every command
+  and flag passes through. `./simply-tussen run` starts the hub and opens the
+  console; `./simply-tussen install` puts `simply-tussen` in `~/.local/bin`, and
   `simply-tussen run` then works from any directory (no browser).
 - **Outside a checkout with no config of your own, the hub runs the shipped
   example built into the binary.** `simply-tussen config path` says so; console
@@ -37,7 +37,7 @@
   there and uses that file from then on; the console's "saved →" shows it.
 - `simply-tussen config path` prints the file the hub would use and why;
   `simply-tussen config init` copies the repo's `hub.toml` to your config path
-  (never overwrites). `./tussen` reads its ports from the same file.
+  (never overwrites). `./simply-tussen` reads its ports from the same file.
 
 ## 1.0.0 — 2026-10-19
 

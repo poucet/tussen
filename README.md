@@ -28,13 +28,13 @@ same signals the musicians play; bring any OSC consumer.
 ## Quick start
 
 ```sh
-./tussen config init    # copy hub.toml to ~/.config/tussen/hub.toml
-./tussen run            # build, start the hub, open the console
+./simply-tussen config init    # copy hub.toml to ~/.config/tussen/hub.toml
+./simply-tussen run            # build, start the hub, open the console
 ```
 
-`./tussen` builds `simply-tussen` from the checkout and passes every command
-and flag on to it (`./tussen --help`); `run` also opens the console in your
-browser. To use the hub outside the checkout, `./tussen install` puts
+`./simply-tussen` builds `simply-tussen` from the checkout and passes every command
+and flag on to it (`./simply-tussen --help`); `run` also opens the console in your
+browser. To use the hub outside the checkout, `./simply-tussen install` puts
 `simply-tussen` in `~/.local/bin` (`--prefix DIR` for elsewhere); then
 `simply-tussen run` works from any directory, the same minus the browser.
 
@@ -57,7 +57,7 @@ copy built into `simply-tussen` outside a checkout), and the console's
 **Save** creates your file from it rather than writing into the repo.
 `simply-tussen config path` says which config the hub would use.
 
-No hardware needed to try it: `./tussen run --fake-midi --fake-pad` invents
+No hardware needed to try it: `./simply-tussen run --fake-midi --fake-pad` invents
 a controller and a gamepad.
 
 Then:

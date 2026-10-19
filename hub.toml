@@ -1,9 +1,9 @@
 # hub.toml — the simply-tussen config. This in-repo file is the shipped example and
 # the default when you have no config of your own (simply-tussen carries a copy
-# built in, for running outside the checkout): `./tussen config init` (or
+# built in, for running outside the checkout): `./simply-tussen config init` (or
 # `simply-tussen config init`) copies it to ~/.config/tussen/hub.toml (or
 # $XDG_CONFIG_HOME/tussen/), which the hub then reads; console Save writes
-# there, never here. Start the hub with `./tussen run`.
+# there, never here. Start the hub with `./simply-tussen run`.
 # It is a working example: everything on one machine, all destinations local.
 # Point the hosts at real machines and name your capture device, and it runs a
 # venue.
