@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0 — 2026-10-19
+
 #### Ableton Link: the hub waits for a session instead of founding one · 2026-10-19 20:09 · qvpsqvxx
 
 - **The hub no longer starts a Link session by itself.** Before, it founded
