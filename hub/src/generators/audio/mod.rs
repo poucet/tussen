@@ -91,7 +91,7 @@ impl Generator for AudioGenerator {
         let (ring_tx, ring) = rtrb::RingBuffer::<f32>::new(cfg.sample_rate as usize * cfg.channels as usize);
         let tap = start_capture(&cfg, ring_tx, &link)?;
         std::thread::Builder::new()
-            .name("tussen-hub audio".into())
+            .name("simply-tussen audio".into())
             .spawn(move || sender_loop(&cfg, &link, Source { ring, tap }))?;
         Ok(())
     }
@@ -102,12 +102,12 @@ impl Generator for AudioGenerator {
 /// device. For tests.
 pub fn stream_ring(cfg: AudioConfig, link: Arc<AudioLink>, ring: rtrb::Consumer<f32>) -> std::io::Result<()> {
     std::thread::Builder::new()
-        .name("tussen-hub audio".into())
+        .name("simply-tussen audio".into())
         .spawn(move || sender_loop(&cfg, &link, Source { ring, tap: None }))?;
     Ok(())
 }
 
-/// One audio device as `tussen-hub list` sees it (merged by name).
+/// One audio device as `simply-tussen list` sees it (merged by name).
 pub use capture::Device as AudioDevice;
 
 /// Every audio device, inputs and outputs alike, merged by name.
@@ -187,7 +187,7 @@ fn hold(running: capture::Capture) -> anyhow::Result<()> {
     if tap {
         use signal_hook::consts::{SIGINT, SIGTERM};
         let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGTERM])?;
-        std::thread::Builder::new().name("tussen-hub tap cleanup".into()).spawn(move || {
+        std::thread::Builder::new().name("simply-tussen tap cleanup".into()).spawn(move || {
             if let Some(sig) = signals.forever().next() {
                 if let Some(running) = ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     let name = running.source().device().to_owned();

@@ -32,11 +32,11 @@ same signals the musicians play; bring any OSC consumer.
 ./tussen run            # build, start the hub, open the console
 ```
 
-`./tussen` builds `tussen-hub` from the checkout and passes every command
+`./tussen` builds `simply-tussen` from the checkout and passes every command
 and flag on to it (`./tussen --help`); `run` also opens the console in your
 browser. To use the hub outside the checkout, `./tussen install` puts
-`tussen-hub` in `~/.local/bin` (`--prefix DIR` for elsewhere); then
-`tussen-hub run` works from any directory, the same minus the browser.
+`simply-tussen` in `~/.local/bin` (`--prefix DIR` for elsewhere); then
+`simply-tussen run` works from any directory, the same minus the browser.
 
 On start the hub prints where to reach it:
 
@@ -53,9 +53,9 @@ counters line every second.
 Your config lives in `~/.config/tussen/hub.toml` (`$XDG_CONFIG_HOME/tussen/`
 if set, macOS too), so you can edit it without touching the checkout. Until
 it exists the hub runs the shipped example (the repo's `hub.toml`, or the
-copy built into `tussen-hub` outside a checkout), and the console's
+copy built into `simply-tussen` outside a checkout), and the console's
 **Save** creates your file from it rather than writing into the repo.
-`tussen-hub config path` says which config the hub would use.
+`simply-tussen config path` says which config the hub would use.
 
 No hardware needed to try it: `./tussen run --fake-midi --fake-pad` invents
 a controller and a gamepad.
@@ -66,8 +66,8 @@ Then:
   sliders, and the OSC endpoint with a copy button;
 - point any OSC tool at **:9000** under its own prefix — e.g. djay Pro's OSC
   output sends `/djay/…`, and it fans out to every subscriber unchanged;
-- `tussen-hub list` prints the audio devices and MIDI ports it can see;
-  `tussen-hub listen --name me` registers a fake device and prints what it
+- `simply-tussen list` prints the audio devices and MIDI ports it can see;
+  `simply-tussen listen --name me` registers a fake device and prints what it
   receives.
 
 macOS is the tested platform, and the audio capture (CoreAudio, macOS 14.2+
@@ -81,7 +81,7 @@ laptop, performance devices — is [docs/guides/setup.md](docs/guides/setup.md).
 ## How signals flow
 
 ```
-MIDI / gamepad / Link ──► tussen-hub :9000 ◄── OSC: devices, djay Pro, /ext/ tools
+MIDI / gamepad / Link ──► simply-tussen :9000 ◄── OSC: devices, djay Pro, /ext/ tools
                                │
                                ├── OSC (never delayed) ──────────► engine (music software)
                                ├── OSC/MIDI (signal delay) ──────► td (visuals)
@@ -110,7 +110,7 @@ commented. The short version:
 |---|---|
 | `[osc]` | the listen port (:9000), packet cap, device timeout |
 | `[[dest]]` | a static destination: `name`, `host`, `port`, `subscribe`/`exclude` prefixes, optional `rtp_port` for the audio stream |
-| `[audio]` | the capture: `""` = default output (tapped), or a device name from `tussen-hub list` |
+| `[audio]` | the capture: `""` = default output (tapped), or a device name from `simply-tussen list` |
 | `[midi]` | MIDI inputs (`"*"` = all) and the refresh cadence |
 | `[pad]` | game controllers on this machine (`enabled`, name filters, refresh) |
 | `[link]` | the hub's own tempo (while it waits, and for a session started from the console) and quantum |
@@ -121,7 +121,7 @@ commented. The short version:
 Which file: `--config <path>` if given, else your user config
 (`~/.config/tussen/hub.toml`, or under `$XDG_CONFIG_HOME`), else the nearest
 `hub.toml` up from the current directory — the repo's shipped example —
-else that same example, built into `tussen-hub`. The startup banner names
+else that same example, built into `simply-tussen`. The startup banner names
 the pick (`config → <path> (user)`). `--audio-device "<name>"` overrides
 `[audio] device` for one run.
 

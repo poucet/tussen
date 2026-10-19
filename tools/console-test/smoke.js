@@ -42,7 +42,7 @@ function client(label) {
     ws.addEventListener('open', () => { clearTimeout(t); ws.close(); resolve(true); });
     ws.addEventListener('error', () => { clearTimeout(t); resolve(false); });
   });
-  if (!reachable) { console.log('skip: no hub console at ' + CONSOLE + ' (start one: tussen-hub run)'); process.exit(0); }
+  if (!reachable) { console.log('skip: no hub console at ' + CONSOLE + ' (start one: simply-tussen run)'); process.exit(0); }
 
   const a = client('a'), b = client('b');
   await Promise.all([a.ready, b.ready]);

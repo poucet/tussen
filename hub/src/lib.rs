@@ -1,4 +1,4 @@
-//! tussen-hub — the OSC router at the centre of tussen.
+//! simply-tussen — the OSC router at the centre of tussen.
 //!
 //! Everything that makes a signal sends it to the hub on :9000; the hub
 //! delivers each signal to whoever subscribed to its prefix. Static

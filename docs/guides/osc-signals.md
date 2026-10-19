@@ -27,7 +27,7 @@ This file is the routing contract: keep it in sync when adding a signal.
 
 **Gamepad: any pad, e.g. the PS5 DualSense — two wirings, same schema**
 
-A controller plugged into the **hub laptop** is read by `tussen-hub` itself
+A controller plugged into the **hub laptop** is read by `simply-tussen` itself
 (`[pad]` in hub.toml) and publishes under **`/tussen/pad/…`** — no device
 app involved. A controller plugged into a **performance device** is read by
 that device's app and publishes under

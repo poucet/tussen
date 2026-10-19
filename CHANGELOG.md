@@ -2,14 +2,21 @@
 
 ## Unreleased
 
-#### `./tussen run`, `tussen-hub` anywhere, and a quiet hub · 2026-10-20 00:18 · ntnkpssp
+#### The binary is `simply-tussen` · 2026-10-20 00:29 · rpklqlnu
 
-- **`./tussen` is `tussen-hub`, built fresh from the checkout**: every command
+- **Renamed: `tussen-hub` → `simply-tussen`** — the command, the installed
+  binary (`./tussen install`), and the MIDI client name. Same commands and
+  flags. If you installed `tussen-hub` before, reinstall and delete the old
+  one from `~/.local/bin`.
+
+#### `./tussen run`, `simply-tussen` anywhere, and a quiet hub · 2026-10-20 00:18 · ntnkpssp
+
+- **`./tussen` is `simply-tussen`, built fresh from the checkout**: every command
   and flag passes through. `./tussen run` starts the hub and opens the
-  console; `./tussen install` puts `tussen-hub` in `~/.local/bin`, and
-  `tussen-hub run` then works from any directory (no browser).
+  console; `./tussen install` puts `simply-tussen` in `~/.local/bin`, and
+  `simply-tussen run` then works from any directory (no browser).
 - **Outside a checkout with no config of your own, the hub runs the shipped
-  example built into the binary.** `tussen-hub config path` says so; console
+  example built into the binary.** `simply-tussen config path` says so; console
   Save creates `~/.config/tussen/hub.toml` from it.
 - **On start the hub prints where to reach it**: console URL, OSC endpoint
   (LAN and local), config. After that it logs only what changes or goes
@@ -28,8 +35,8 @@
 - **Console Save never writes into the repo.** Running on the repo's example,
   Save copies it (comments and all) to your config path, applies the edit
   there and uses that file from then on; the console's "saved →" shows it.
-- `tussen-hub config path` prints the file the hub would use and why;
-  `tussen-hub config init` copies the repo's `hub.toml` to your config path
+- `simply-tussen config path` prints the file the hub would use and why;
+  `simply-tussen config init` copies the repo's `hub.toml` to your config path
   (never overwrites). `./tussen` reads its ports from the same file.
 
 ## 1.0.0 — 2026-10-19

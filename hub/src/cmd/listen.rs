@@ -1,4 +1,4 @@
-//! `tussen-hub listen` — register like a device and print
+//! `simply-tussen listen` — register like a device and print
 //! signal rates; with `--audio`, also receive the hub's RTP stream and
 //! print packet rate, loss (sequence gaps) and arrival jitter (RFC 3550
 //! interarrival jitter, reported in ms at the 48 kHz sample clock).

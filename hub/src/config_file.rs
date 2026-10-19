@@ -7,7 +7,7 @@
 //! 3. the nearest `hub.toml` walking up from the working directory — the
 //!    repo's shipped example;
 //! 4. that same example compiled into the binary ([`SHIPPED`]), so an
-//!    installed `tussen-hub run` works from anywhere.
+//!    installed `simply-tussen run` works from anywhere.
 //!
 //! Neither example is ever written: Save from either goes to the user
 //! config instead (see [`ConfigFile::save_target`]).
@@ -91,7 +91,7 @@ impl fmt::Display for ConfigFile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (self.source, &self.user_path) {
             (Source::Builtin, Some(user)) => {
-                write!(f, "(built-in example; tussen-hub config init writes {})", user.display())
+                write!(f, "(built-in example; simply-tussen config init writes {})", user.display())
             }
             (Source::Builtin, None) => f.write_str("(built-in example; HOME is unset, so no user config)"),
             _ => write!(f, "{} ({})", self.path.display(), self.source),
@@ -143,7 +143,7 @@ impl ConfigFile {
     }
 }
 
-/// `tussen-hub config init`: put a copy of `from` (the shipped example
+/// `simply-tussen config init`: put a copy of `from` (the shipped example
 /// when `None`) at `to`. Never overwrites.
 pub fn init(from: Option<&Path>, to: &Path) -> anyhow::Result<()> {
     if to.exists() {
@@ -245,7 +245,7 @@ pub(crate) mod tests {
             assert_eq!(c.user_path.as_deref(), Some(user.as_path()));
             assert_eq!(
                 c.to_string(),
-                format!("(built-in example; tussen-hub config init writes {})", user.display())
+                format!("(built-in example; simply-tussen config init writes {})", user.display())
             );
             assert_eq!(c.text().unwrap(), SHIPPED);
             let c = ConfigFile::resolve(None, &Env { home: None, ..env }).unwrap();

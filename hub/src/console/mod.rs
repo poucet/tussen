@@ -204,7 +204,7 @@ impl SeenTable {
         if self.map.len() >= SEEN_WARN && !self.warned {
             self.warned = true;
             eprintln!(
-                "tussen-hub: {} distinct OSC addresses seen — some sender is minting \
+                "simply-tussen: {} distinct OSC addresses seen — some sender is minting \
                  addresses; the console's list keeps them all",
                 self.map.len() + 1
             );
@@ -345,11 +345,11 @@ pub fn start(opts: ConsoleOptions) -> anyhow::Result<(Console, RouterConsole)> {
     let (link_tx, link_rx) = crossbeam_channel::bounded(64);
     let stop = Arc::new(AtomicBool::new(false));
 
-    std::thread::Builder::new().name("tussen-hub console accept".into()).spawn({
+    std::thread::Builder::new().name("simply-tussen console accept".into()).spawn({
         let stop = Arc::clone(&stop);
         move || server::accept_loop(listener, inbox_tx, stop)
     })?;
-    std::thread::Builder::new().name("tussen-hub console".into()).spawn({
+    std::thread::Builder::new().name("simply-tussen console".into()).spawn({
         let mut hub = ConsoleHub {
             state: opts.state,
             osc_port: opts.osc_port,

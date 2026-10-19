@@ -59,7 +59,7 @@ impl Default for ConsoleConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct AudioConfig {
-    /// Any audio device by name, as `tussen-hub list` prints it: one with
+    /// Any audio device by name, as `simply-tussen list` prints it: one with
     /// inputs is captured as an input, an output-only one is tapped.
     /// "" = the system default output (tapped).
     pub device: String,

@@ -1,7 +1,7 @@
-# hub.toml — the tussen-hub config. This in-repo file is the shipped example and
-# the default when you have no config of your own (tussen-hub carries a copy
+# hub.toml — the simply-tussen config. This in-repo file is the shipped example and
+# the default when you have no config of your own (simply-tussen carries a copy
 # built in, for running outside the checkout): `./tussen config init` (or
-# `tussen-hub config init`) copies it to ~/.config/tussen/hub.toml (or
+# `simply-tussen config init`) copies it to ~/.config/tussen/hub.toml (or
 # $XDG_CONFIG_HOME/tussen/), which the hub then reads; console Save writes
 # there, never here. Start the hub with `./tussen run`.
 # It is a working example: everything on one machine, all destinations local.
@@ -53,11 +53,11 @@ exclude = ["/tussen/hub/"]
 rtp_port = 5006
 
 # The audio the hub streams to the visuals destination and the devices. Any
-# name `tussen-hub list` prints: a device with inputs is read, an output-only
+# name `simply-tussen list` prints: a device with inputs is read, an output-only
 # one is tapped. "" = this machine's default output.
 [audio]
 device = ""
-# device = "<a loopback device carrying the mix, from `tussen-hub list`>"
+# device = "<a loopback device carrying the mix, from `simply-tussen list`>"
 sample_rate = 48000
 channels = 2
 packet_frames = 256

@@ -41,15 +41,15 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
 ## Hub laptop
 
 1. **Audio in.** Mixer output → the audio interface. The hub captures any
-   device `tussen-hub list` prints: a device with inputs is read, an
+   device `simply-tussen list` prints: a device with inputs is read, an
    output-only one is tapped (a CoreAudio process tap, macOS 14.2+; the
    output still plays). `""` taps the default output — fine on one machine,
    where the music software plays locally. With a mixer, name the
    interface, or a loopback device carrying its input.
-2. **Edit your config** — `./tussen config init` (or `tussen-hub config
+2. **Edit your config** — `./tussen config init` (or `simply-tussen config
    init` once installed) copies the repo's `hub.toml` (the shipped example) to `~/.config/tussen/hub.toml`
    (`$XDG_CONFIG_HOME/tussen/hub.toml` if that is set), and the hub reads
-   that file from then on; `tussen-hub config path` prints which file it
+   that file from then on; `simply-tussen config path` prints which file it
    would use. Three lines for a room, each with a commented example under
    it:
 
@@ -67,8 +67,8 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    music laptops, and opens the console (its top bar has a copy button for
    the endpoint). Ctrl-C stops it. `./tussen run --fake-midi` stands in
    for a MIDI controller; `--audio-device "<name>"` overrides `[audio]` for
-   one run. `./tussen install` puts `tussen-hub` in `~/.local/bin`, so
-   `tussen-hub run` works from anywhere — the same, minus opening the
+   one run. `./tussen install` puts `simply-tussen` in `~/.local/bin`, so
+   `simply-tussen run` works from anywhere — the same, minus opening the
    browser.
 4. **First run on macOS:** allow incoming connections, and let the terminal
    record system audio. Dismissed it? System Settings ▸ Privacy & Security ▸
@@ -76,7 +76,7 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    terminal app, then restart the hub.
 5. **Check:** the start-up log names the capture (`audio: tapping output …`
    or `audio: capturing input …`), and with `run --stats` the per-second
-   line reads `audio=187.5pkt/s` once anyone is listening. `tussen-hub listen --name me
+   line reads `audio=187.5pkt/s` once anyone is listening. `simply-tussen listen --name me
    --audio` registers a throwaway device and prints the stream's peak level.
 6. **Link.** The hub never founds an Ableton Link session by itself. It
    starts *waiting* (the console's Link field says `Link: waiting`), with a
@@ -118,7 +118,7 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
 The `td` destination gets the signals on :9001, held back by the signal
 delay so they land with the music, and the music itself as a standard RTP
 stream on :5006: L16, 48 kHz stereo, payload type 96, 256 frames a packet
-(`tussen-hub sdp` prints the same as an SDP file). No tussen code runs here:
+(`simply-tussen sdp` prints the same as an SDP file). No tussen code runs here:
 GStreamer turns the stream into a loopback audio device, and the visuals
 software reads that device.
 
@@ -250,7 +250,7 @@ tick *keep* to send the original too. `*` matches one path segment. Save.
 - **No audio stream:** the hub streams only to someone who asked — a
   registered device with an RTP port, or a destination with `rtp_port`.
   Silent stream: is the music actually on the device the hub captures (its
-  start line names it; `tussen-hub list` marks the default)? A tap that logs `only digital
+  start line names it; `simply-tussen list` marks the default)? A tap that logs `only digital
   silence` is missing the system-audio-recording permission (hub laptop,
   step 4).
 - **Console shows nothing:** `[console] enabled = true`, and only

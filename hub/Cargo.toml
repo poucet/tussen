@@ -1,5 +1,5 @@
 [package]
-name = "tussen-hub"
+name = "simply-tussen"
 description = "An OSC/MIDI/audio hub for live performance: subscription routing, Ableton Link, and two sync delays that line signals up with the music"
 version = "1.0.0"
 edition = "2021"
@@ -10,7 +10,7 @@ name = "tussen_hub"
 path = "src/lib.rs"
 
 [[bin]]
-name = "tussen-hub"
+name = "simply-tussen"
 path = "src/main.rs"
 
 [dependencies]

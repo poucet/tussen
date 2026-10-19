@@ -1,7 +1,7 @@
 //! Minimal RTP (RFC 3550) for the one thing the hub sends: L16 (RFC 3551)
 //! 16-bit big-endian PCM. L16's static payload types only cover 44.1 kHz,
 //! so 48 kHz rides on dynamic payload type 96, declared by the SDP that
-//! `tussen-hub sdp` prints. The parser half exists for `listen --audio`
+//! `simply-tussen sdp` prints. The parser half exists for `listen --audio`
 //! and the tests.
 
 /// Dynamic payload type for L16/48000/2 — matched by [`sdp`].
@@ -108,7 +108,7 @@ pub fn sdp(dest_ip: &str, dest_port: u16, sample_rate: u32, channels: u16) -> St
     format!(
         "v=0\r\n\
          o=- 0 0 IN IP4 127.0.0.1\r\n\
-         s=tussen-hub engine audio\r\n\
+         s=simply-tussen engine audio\r\n\
          c=IN IP4 {dest_ip}\r\n\
          t=0 0\r\n\
          m=audio {dest_port} RTP/AVP {PAYLOAD_TYPE}\r\n\

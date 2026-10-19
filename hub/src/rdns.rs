@@ -60,7 +60,7 @@ impl Names {
         if due {
             entry.at = None;
             let (lookup, cache) = (Arc::clone(&self.lookup), Arc::clone(&self.cache));
-            let spawned = std::thread::Builder::new().name("tussen-hub rdns".into()).spawn(move || {
+            let spawned = std::thread::Builder::new().name("simply-tussen rdns".into()).spawn(move || {
                 let name = lookup(ip);
                 let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
                 cache.insert(ip, Entry { name, at: Some(Instant::now()) });

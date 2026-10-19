@@ -66,7 +66,7 @@ impl Drop for Hub {
 /// Bind the OSC port, start the loop. `generated` is the channel the
 /// generators publish into; pass a channel with no senders
 /// left alive if there are none. Without `quiet` the loop prints a
-/// stats line every second (`tussen-hub run --stats`); either way it
+/// stats line every second (`simply-tussen run --stats`); either way it
 /// warns, at most once a minute, when something is going wrong
 /// ([`Trouble`]).
 pub fn spawn(config: Config, generated: Receiver<Message>, quiet: bool) -> anyhow::Result<Hub> {
@@ -124,7 +124,7 @@ pub fn spawn_with(config: Config, generated: Receiver<Message>, quiet: bool, ext
     // message or a due delayed message is handled the moment it is ready.
     let (net_tx, net_rx) = crossbeam_channel::bounded::<Inbound>(1024);
     let malformed = Arc::new(AtomicU64::new(0));
-    std::thread::Builder::new().name("tussen-hub recv".into()).spawn({
+    std::thread::Builder::new().name("simply-tussen recv".into()).spawn({
         let stop = Arc::clone(&stop);
         let malformed = Arc::clone(&malformed);
         move || {
@@ -139,7 +139,7 @@ pub fn spawn_with(config: Config, generated: Receiver<Message>, quiet: bool, ext
         }
     })?;
 
-    let thread = std::thread::Builder::new().name("tussen-hub router".into()).spawn({
+    let thread = std::thread::Builder::new().name("simply-tussen router".into()).spawn({
         let stop = Arc::clone(&stop);
         move || {
             if !crate::timing::precise_wakeups() {
@@ -173,7 +173,7 @@ pub fn spawn_resolver(
         return crossbeam_channel::never();
     }
     let (tx, rx) = crossbeam_channel::bounded::<Resolved>(4);
-    let spawned = std::thread::Builder::new().name("tussen-hub resolve".into()).spawn(move || {
+    let spawned = std::thread::Builder::new().name("simply-tussen resolve".into()).spawn(move || {
         let mut next = Instant::now() + period;
         while !stop.load(Ordering::Relaxed) {
             if Instant::now() < next {
@@ -284,7 +284,7 @@ impl TroubleLog {
         };
         self.pending = Trouble::default();
         self.warned = Some(now);
-        Some(format!("{what} {window} (tussen-hub run --stats shows the per-second counts)"))
+        Some(format!("{what} {window} (simply-tussen run --stats shows the per-second counts)"))
     }
 }
 

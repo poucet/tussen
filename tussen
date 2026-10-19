@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ./tussen — tussen-hub, built fresh from this checkout. Every command and flag is
-# tussen-hub's own (`./tussen --help`), with two additions:
+# ./tussen — simply-tussen, built fresh from this checkout. Every command and flag is
+# simply-tussen's own (`./tussen --help`), with two additions:
 #
-#   ./tussen install [--prefix DIR]   install tussen-hub into DIR/bin (default ~/.local/bin),
-#                                     so `tussen-hub …` does what `./tussen …` does
+#   ./tussen install [--prefix DIR]   install simply-tussen into DIR/bin (default ~/.local/bin),
+#                                     so `simply-tussen …` does what `./tussen …` does
 #   ./tussen run …                    also opens the console in your browser
 #                                     (TUSSEN_NO_OPEN=1 skips it; the binary never does)
 #
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-HUB="$ROOT/hub/target/release/tussen-hub"
+HUB="$ROOT/hub/target/release/simply-tussen"
 
 die() { echo "tussen: $*" >&2; exit 1; }
 
@@ -34,9 +34,9 @@ install_hub() {
   done
   local bin="$prefix/bin"
   mkdir -p "$bin"
-  # Copy beside, then rename over: a running tussen-hub is never rewritten in place.
-  cp "$HUB" "$bin/.tussen-hub.new" && mv -f "$bin/.tussen-hub.new" "$bin/tussen-hub"
-  echo "installed $bin/tussen-hub"
+  # Copy beside, then rename over: a running simply-tussen is never rewritten in place.
+  cp "$HUB" "$bin/.simply-tussen.new" && mv -f "$bin/.simply-tussen.new" "$bin/simply-tussen"
+  echo "installed $bin/simply-tussen"
   case ":$PATH:" in
     *":$bin:"*) ;;
     *) local rc="~/.profile"
@@ -56,7 +56,7 @@ for a in "$@"; do
   ARGS+=("$a"); prev="$a"
 done
 
-# The console's port from the config the hub will use (`tussen-hub config path`:
+# The console's port from the config the hub will use (`simply-tussen config path`:
 # `<file> (<source>)`, or `(built-in example; …)` — this checkout's hub.toml).
 console_url() {
   local flag=() prev="" cfg port
@@ -98,7 +98,7 @@ case "${1:-}" in
   ""|help|-h|--help)
            rc=0; (cd "$ROOT" && "$HUB" ${ARGS[@]+"${ARGS[@]}"}) || rc=$?
            echo
-           echo "./tussen adds: install [--prefix DIR] (tussen-hub into DIR/bin, default ~/.local/bin),"
+           echo "./tussen adds: install [--prefix DIR] (simply-tussen into DIR/bin, default ~/.local/bin),"
            echo "and run also opens the console in your browser (TUSSEN_NO_OPEN=1 skips it)."
            exit "$rc" ;;
   *)       cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;

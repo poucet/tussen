@@ -45,7 +45,7 @@ pub fn accept_loop(listener: TcpListener, inbox: Sender<ClientMsg>, stop: Arc<At
         let next_id = Arc::clone(&next_id);
         let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
         let _ = std::thread::Builder::new()
-            .name("tussen-hub console conn".into())
+            .name("simply-tussen console conn".into())
             .spawn(move || {
                 if let Err(e) = connection(stream, port, &inbox, &next_id) {
                     log::debug!("console connection: {e}");

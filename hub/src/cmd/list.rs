@@ -1,4 +1,4 @@
-//! `tussen-hub list` — what this machine offers the
+//! `simply-tussen list` — what this machine offers the
 //! generators: the audio devices (any name works as `[audio] device`)
 //! and the MIDI input ports.
 
@@ -22,7 +22,7 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     println!("MIDI inputs:");
-    match simply_midi::input::input_ports("tussen-hub") {
+    match simply_midi::input::input_ports("simply-tussen") {
         Ok(ports) if ports.is_empty() => println!("  (none)"),
         Ok(ports) => {
             for port in ports {

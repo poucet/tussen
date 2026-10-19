@@ -1,4 +1,4 @@
-//! `tussen-hub fake-device` — the device-schema signals at 60 Hz without a
+//! `simply-tussen fake-device` — the device-schema signals at 60 Hz without a
 //! headset. Does not register; it only sends.
 
 use std::net::UdpSocket;

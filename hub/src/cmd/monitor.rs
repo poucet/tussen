@@ -1,4 +1,4 @@
-//! `tussen-hub monitor` — a live table of what the hub routes here:
+//! `simply-tussen monitor` — a live table of what the hub routes here:
 //! address, value, msgs/s, source, and a label when `signals.yaml` knows
 //! the address. Point the config's `monitor` destination at this port.
 

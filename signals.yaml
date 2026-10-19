@@ -187,7 +187,7 @@ signals:
   - address: /tussen/{dev}/pad/select/press
     unit: event
     label: select (DualSense create) pressed
-  # Gamepad on the hub laptop (tussen-hub [pad], gilrs): the same schema
+  # Gamepad on the hub laptop (simply-tussen [pad], gilrs): the same schema
   # under /tussen/pad/… — a controller plugged into the hub machine, no
   # device app involved.
   # DualSense: south/east/west/north = cross/circle/square/triangle,

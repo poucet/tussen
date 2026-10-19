@@ -1,8 +1,8 @@
-//! `tussen-hub sdp` — print an SDP describing the hub's RTP/L16 stream,
+//! `simply-tussen sdp` — print an SDP describing the hub's RTP/L16 stream,
 //! so a stock player can hear it while debugging:
 //!
 //! ```sh
-//! tussen-hub sdp --to 127.0.0.1:5004 > stream.sdp
+//! simply-tussen sdp --to 127.0.0.1:5004 > stream.sdp
 //! ffplay -nodisp -protocol_whitelist file,rtp,udp stream.sdp
 //! ```
 //!

@@ -324,11 +324,11 @@ impl Generator for MidiGenerator {
         // Probe the ports now so a machine with no MIDI client fails
         // start() visibly (logged; the hub keeps running without us).
         if fake.is_none() {
-            simply_midi::input::input_ports("tussen-hub")
+            simply_midi::input::input_ports("simply-tussen")
                 .map_err(|e| anyhow::anyhow!("MIDI unavailable: {e}"))?;
         }
         std::thread::Builder::new()
-            .name("tussen-hub midi".into())
+            .name("simply-tussen midi".into())
             .spawn(move || run_midi(&config, fake, &out))?;
         Ok(())
     }
@@ -413,7 +413,7 @@ fn rescan(
     listeners: &mut Vec<simply_midi::input::MidiListener>,
     open_names: &mut Vec<String>,
 ) {
-    let ports = match simply_midi::input::input_ports("tussen-hub") {
+    let ports = match simply_midi::input::input_ports("simply-tussen") {
         Ok(ports) => ports,
         Err(e) => {
             // The whole MIDI system went away; keep what we hold and retry.
@@ -458,7 +458,7 @@ fn rescan(
         Some(list) => list.into_iter().map(Some).collect(),
     };
     for select in select_list {
-        match simply_midi::input::open_inputs("tussen-hub", select.as_deref(), |_port| {
+        match simply_midi::input::open_inputs("simply-tussen", select.as_deref(), |_port| {
             handler(tx.clone(), Arc::clone(dropped))
         }) {
             Ok(listener) => {

@@ -1,4 +1,4 @@
-//! `tussen-hub run` — load the config, start the generators, run the
+//! `simply-tussen run` — load the config, start the generators, run the
 //! router until killed.
 
 use std::sync::Arc;
@@ -31,7 +31,7 @@ pub fn run(
         config.audio.device = device.to_owned();
     }
     log::info!(
-        "tussen-hub: OSC on :{}, {} static destination(s), max packet {} B",
+        "simply-tussen: OSC on :{}, {} static destination(s), max packet {} B",
         config.osc.listen_port,
         config.dests.len(),
         config.osc.max_packet

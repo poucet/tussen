@@ -1,4 +1,4 @@
-//! The clock generator: tussen-hub joins Ableton Link and
+//! The clock generator: simply-tussen joins Ableton Link and
 //! publishes the session's beat under `/tussen/clock/…`.
 //!
 //! **Waiting, not founding.** Link has no master, and between two
@@ -384,7 +384,7 @@ impl Generator for LinkGenerator {
         let cmds = self.cmds.clone();
         let tap = self.tap.clone();
         std::thread::Builder::new()
-            .name("tussen-hub link".into())
+            .name("simply-tussen link".into())
             .spawn(move || run_link(&link, &config, &cmds, tap.as_deref(), &out))?;
         Ok(())
     }

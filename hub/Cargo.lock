@@ -1426,6 +1426,31 @@ version = "1.0.0"
 source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.0#bd268fe1a6b5be1c673739e816c4f082ca20193b"
 
 [[package]]
+name = "simply-tussen"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossbeam-channel",
+ "dns-lookup",
+ "env_logger",
+ "gilrs",
+ "httparse",
+ "log",
+ "rtrb",
+ "serde",
+ "serde_json",
+ "signal-hook",
+ "simply-audio-capture",
+ "simply-link",
+ "simply-midi",
+ "simply-osc",
+ "toml",
+ "toml_edit 0.22.27",
+ "tungstenite",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1601,31 +1626,6 @@ dependencies = [
  "sha1",
  "thiserror 2.0.21",
  "utf-8",
-]
-
-[[package]]
-name = "tussen-hub"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "crossbeam-channel",
- "dns-lookup",
- "env_logger",
- "gilrs",
- "httparse",
- "log",
- "rtrb",
- "serde",
- "serde_json",
- "signal-hook",
- "simply-audio-capture",
- "simply-link",
- "simply-midi",
- "simply-osc",
- "toml",
- "toml_edit 0.22.27",
- "tungstenite",
 ]
 
 [[package]]

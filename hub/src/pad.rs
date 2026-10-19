@@ -311,7 +311,7 @@ impl Generator for PadGenerator {
         let config = self.config.clone();
         let fake = self.fake;
         std::thread::Builder::new()
-            .name("tussen-hub pad".into())
+            .name("simply-tussen pad".into())
             .spawn(move || run_pad(&config, fake, &out))?;
         Ok(())
     }

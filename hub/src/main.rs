@@ -1,4 +1,4 @@
-//! The tussen-hub CLI. The library does the work; this file parses
+//! The simply-tussen CLI. The library does the work; this file parses
 //! arguments and dispatches.
 
 mod cmd;
@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use tussen_hub::config_file::{self, ConfigFile, Env};
 
 #[derive(Parser)]
-#[command(name = "tussen-hub", about = "The tussen OSC router")]
+#[command(name = "simply-tussen", about = "The tussen OSC router")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -95,7 +95,7 @@ enum Command {
         rtp_port: u16,
     },
     /// Print an SDP for the RTP audio stream, so ffplay or VLC can play
-    /// it: `tussen-hub sdp > stream.sdp && ffplay -protocol_whitelist
+    /// it: `simply-tussen sdp > stream.sdp && ffplay -protocol_whitelist
     /// file,rtp,udp stream.sdp` (the receiver must listen on that port —
     /// `listen --audio --rtp-port 5004` does).
     Sdp {
