@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
-# tools/tussen — build and run the hub with the repo's hub.toml.
+# tools/tussen [args…] — build the hub, start it with the repo's hub.toml, print the
+# console URL and the OSC endpoint, open the console; Ctrl-C stops it.
 #
-#   tools/tussen run [run args…]   build, start the hub, print the console URL and the OSC
-#                                  endpoint, open the console; Ctrl-C stops it
-#   tools/tussen [run args…]       same as run, e.g. tools/tussen --fake-midi --fake-pad
-#   tools/tussen build             build the hub (release)
-#   tools/tussen hub <args…>       build, then any tussen-hub command, e.g. hub list
-#   tools/tussen help              this text
-#
-# Run args pass through to `tussen-hub run`: --fake-midi, --fake-pad (no hardware needed),
+# Args pass through to `tussen-hub run`: --fake-midi, --fake-pad (no hardware needed),
 # --audio-device <name>, --config <path>. TUSSEN_NO_OPEN=1 skips opening the console.
+# Other hub commands: hub/target/release/tussen-hub --help.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -76,12 +71,5 @@ run_hub() {
   wait "$HUB_PID"
 }
 
-cmd="${1:-help}"
-case "$cmd" in -h|--help) ;; --*) cmd=run ;; *) [ $# -gt 0 ] && shift ;; esac
-case "$cmd" in
-  run)   build_hub; run_hub "$@" ;;
-  build) build_hub; echo "built $HUB" ;;
-  hub)   build_hub; cd "$ROOT" && exec "$HUB" "$@" ;;
-  help|-h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) die "unknown command '$cmd' (try: tools/tussen help)" ;;
-esac
+build_hub
+run_hub "$@"
