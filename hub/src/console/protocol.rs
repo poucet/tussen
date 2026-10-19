@@ -77,12 +77,15 @@ pub fn addrs(list: &[AddrInfo]) -> String {
 }
 
 pub fn link(s: &crate::link::LinkStatus) -> String {
-    json!({
+    let mut v = json!({
         "t": "link", "ts": s.ts, "beat": s.beat, "bpm": s.bpm,
         "quantum": s.quantum, "playing": s.playing, "mode": s.mode, "peers": s.peers,
         "peer_list": s.peer_list,
-    })
-    .to_string()
+    });
+    if let Some(r) = &s.replay {
+        v["replay"] = json!(r);
+    }
+    v.to_string()
 }
 
 pub fn saved(result: Result<&str, &str>) -> String {
@@ -250,6 +253,7 @@ mod tests {
             playing: true,
             mode: crate::link::Mode::Joined,
             peers: 1,
+            replay: None,
             peer_list: vec![
                 crate::link::PeerRow {
                     node: "abcdefgh".into(),

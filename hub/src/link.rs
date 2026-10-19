@@ -67,6 +67,7 @@ use simply_osc::{Message, Value};
 
 use crate::console::{self, Event, Tap};
 use crate::generators::Generator;
+use crate::take::Recorder;
 
 /// Everything published lives under this prefix.
 pub const PREFIX: &str = "/tussen/clock/";
@@ -180,6 +181,8 @@ pub struct LinkStatus {
     pub peers: usize,
     /// Every peer heard, in or out of the session ([`peer_rows`]).
     pub peer_list: Vec<PeerRow>,
+    /// Set while replaying a take: what the top bar shows.
+    pub replay: Option<crate::replay::Status>,
 }
 
 /// One Link peer as the console lists it.
@@ -353,17 +356,55 @@ pub fn next_wake(state: &SessionState, now: Micros, next_tick: Micros) -> Micros
     next_tick.min(next_beat.max(now))
 }
 
+/// The published timeline into a take: on every change (tempo,
+/// transport, mode, a jump in the beat) and once a second.
+#[derive(Default)]
+pub struct TimelineTake {
+    last: Option<(SessionState, Mode, Micros)>,
+}
+
+impl TimelineTake {
+    pub fn record(&mut self, rec: &Recorder, s: &SessionState, mode: Mode, quantum: f64, at: Instant, now: Micros) {
+        let changed = match &self.last {
+            None => true,
+            Some((last, last_mode, when)) => {
+                *last_mode != mode
+                    || (last.tempo() - s.tempo()).abs() > 1e-6
+                    || running(last) != running(s)
+                    || (last.beat_at(now) - s.beat_at(now)).abs() > 1e-3
+                    || now - when >= 1_000_000
+            }
+        };
+        if changed {
+            let mode_id = match mode {
+                Mode::Waiting => 0,
+                Mode::Joined => 1,
+                Mode::Started => 2,
+            };
+            rec.link(at, s.tempo(), s.beat_at(now), running(s), mode_id, quantum);
+            self.last = Some((*s, mode, now));
+        }
+    }
+}
+
 /// The generator: joins Link in `start`, then runs its own thread.
 pub struct LinkGenerator {
     config: LinkConfig,
     cmds: Receiver<LinkCmd>,
     tap: Option<Arc<Tap>>,
+    recorder: Option<Arc<Recorder>>,
 }
 
 impl LinkGenerator {
     /// `cmds` and `tap` come from the console, if there is one.
     pub fn new(config: LinkConfig, cmds: Receiver<LinkCmd>, tap: Option<Arc<Tap>>) -> LinkGenerator {
-        LinkGenerator { config, cmds, tap }
+        LinkGenerator { config, cmds, tap, recorder: None }
+    }
+
+    /// `run --record`: the published timeline goes into the take.
+    pub fn recording(mut self, recorder: Option<Arc<Recorder>>) -> LinkGenerator {
+        self.recorder = recorder;
+        self
     }
 }
 
@@ -383,9 +424,10 @@ impl Generator for LinkGenerator {
         );
         let cmds = self.cmds.clone();
         let tap = self.tap.clone();
+        let rec = self.recorder.clone();
         std::thread::Builder::new()
             .name("simply-tussen link".into())
-            .spawn(move || run_link(&link, &config, &cmds, tap.as_deref(), &out))?;
+            .spawn(move || run_link(&link, &config, &cmds, tap.as_deref(), rec.as_deref(), &out))?;
         Ok(())
     }
 }
@@ -430,7 +472,15 @@ fn command(link: &Link, private: &mut SessionState, started: &mut bool, cmd: Lin
     }
 }
 
-fn run_link(link: &Link, config: &LinkConfig, cmds: &Receiver<LinkCmd>, tap: Option<&Tap>, out: &Sender<Message>) {
+fn run_link(
+    link: &Link,
+    config: &LinkConfig,
+    cmds: &Receiver<LinkCmd>,
+    tap: Option<&Tap>,
+    rec: Option<&Recorder>,
+    out: &Sender<Message>,
+) {
+    let mut taken = TimelineTake::default();
     let clock = link.clock();
     let mut beats = Beats::default();
     let mut next_tick = clock.now();
@@ -481,6 +531,9 @@ fn run_link(link: &Link, config: &LinkConfig, cmds: &Receiver<LinkCmd>, tap: Opt
         }
 
         let now = clock.now();
+        if let Some(rec) = rec {
+            taken.record(rec, &beat, mode, config.quantum, clock.instant(now), now);
+        }
         if let Some(s) = sample(&beat, now) {
             if let Some(b) = beats.update(s.beat, s.running) {
                 if out.send(onbeat(b)).is_err() {
@@ -506,6 +559,7 @@ fn run_link(link: &Link, config: &LinkConfig, cmds: &Receiver<LinkCmd>, tap: Opt
                         mode,
                         peers: state.peers,
                         peer_list: peer_rows(&link.peers(), now, own.get(), |ip| names.get(ip)),
+                        replay: None,
                     }));
                 }
             }

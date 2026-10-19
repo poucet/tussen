@@ -67,6 +67,9 @@ pub struct AudioLink {
     /// The hub console's timeline tap: min/max/rms per packet,
     /// computed here on the sender thread — never in the capture callback.
     pub tap: OnceLock<Arc<crate::console::Tap>>,
+    /// `run --record`: every packetized block and its stamp, handed to
+    /// the recorder over wait-free rings.
+    pub rec: OnceLock<Mutex<crate::take::AudioRecTx>>,
 }
 
 pub struct AudioGenerator {
@@ -271,7 +274,11 @@ fn sender_loop(cfg: &AudioConfig, link: &AudioLink, source: Source) {
         }
 
         if ready {
-            packetizer.packet_into(&block, channels, ring.next_slot(Instant::now()));
+            let made = Instant::now();
+            packetizer.packet_into(&block, channels, ring.next_slot(made));
+            if let Some(Ok(mut rec)) = link.rec.get().map(Mutex::lock) {
+                rec.push(&block, made);
+            }
             statics.send(link, &socket, &block, channels, packetizer.ssrc);
             link.packets.fetch_add(1, Ordering::Relaxed);
             if let Some(tap) = link.tap.get().filter(|t| t.active()) {

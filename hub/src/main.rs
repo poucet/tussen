@@ -41,6 +41,37 @@ enum Command {
         /// Override the config's [audio] device ("" = the default output).
         #[arg(long)]
         audio_device: Option<String>,
+        /// Record everything the hub routes, its audio and the Link
+        /// timeline into a new take (optionally named) until the hub stops.
+        #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "")]
+        record: Option<String>,
+        /// Play a take (a name in the takes directory, a path, or `latest`)
+        /// as if live, looping, instead of the hub's own MIDI, pad, audio and Link.
+        #[arg(long, value_name = "TAKE")]
+        replay: Option<String>,
+        /// Where takes live. Default: $XDG_DATA_HOME/tussen/takes, else
+        /// ~/.local/share/tussen/takes.
+        #[arg(long)]
+        takes_dir: Option<PathBuf>,
+        /// With --replay: loop bars A..B (from bar A's first beat to bar B's).
+        #[arg(long = "loop", value_name = "A..B", value_parser = parse_bars)]
+        loop_bars: Option<(u32, u32)>,
+        /// With --replay: start at this bar.
+        #[arg(long = "from", value_name = "BAR")]
+        from_bar: Option<u32>,
+        /// With --replay: play the audio this much ahead of the signals
+        /// (default: the take's final signal delay).
+        #[arg(long)]
+        audio_lead_ms: Option<u32>,
+        /// With --replay: lead the Link session with the take's timeline
+        /// (found one if none), or leave Link alone.
+        #[arg(long, value_enum, default_value_t = tussen_hub::replay::LinkMode::Lead)]
+        replay_link: tussen_hub::replay::LinkMode,
+    },
+    /// The recorded takes: name, date, length, size.
+    Takes {
+        #[arg(long)]
+        takes_dir: Option<PathBuf>,
     },
     /// Where the hub config lives: `config path` prints the one `run`
     /// would use, `config init` copies the repo's hub.toml to the user config.
@@ -122,12 +153,50 @@ enum ConfigAction {
     Init,
 }
 
+/// `9..17` → (9, 17).
+fn parse_bars(s: &str) -> Result<(u32, u32), String> {
+    let (a, b) = s.split_once("..").ok_or("expected <bar>..<bar>, e.g. 9..17")?;
+    let n = |x: &str| x.trim().parse::<u32>().map_err(|e| format!("{x:?}: {e}"));
+    Ok((n(a)?, n(b)?))
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match Cli::parse().command {
-        Command::Run { config, stats, fake_midi, fake_pad, audio_device } => {
-            let config = ConfigFile::resolve(config, &Env::from_process()?)?;
-            cmd::run::run(config, fake_midi, fake_pad, audio_device.as_deref(), stats)
+        Command::Run {
+            config,
+            stats,
+            fake_midi,
+            fake_pad,
+            audio_device,
+            record,
+            replay,
+            takes_dir,
+            loop_bars,
+            from_bar,
+            audio_lead_ms,
+            replay_link,
+        } => {
+            let env = Env::from_process()?;
+            let config = ConfigFile::resolve(config, &env)?;
+            let takes = cmd::run::Takes {
+                record: record.map(|n| Some(n).filter(|n| !n.is_empty())),
+                replay,
+                dir: takes_dir.or_else(|| env.takes_dir()),
+                replay_opts: tussen_hub::replay::Options {
+                    loop_bars,
+                    from_bar,
+                    audio_lead_ms,
+                    link: replay_link,
+                    ..Default::default()
+                },
+            };
+            cmd::run::run(config, fake_midi, fake_pad, audio_device.as_deref(), stats, takes)
+        }
+        Command::Takes { takes_dir } => {
+            let env = Env::from_process()?;
+            let dir = takes_dir.or_else(|| env.takes_dir()).ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
+            cmd::takes::run(&dir)
         }
         Command::Monitor { port, filter } => cmd::monitor::run(port, filter.as_deref()),
         Command::FakeDevice { name, pattern, hub } => cmd::fake_device::run(&name, pattern, &hub),

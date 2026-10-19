@@ -30,6 +30,7 @@ use crate::console::{self, Event, RouterCmd, RouterConsole, SeenTable};
 use crate::generators::audio::{AudioLink, RtpTarget};
 use crate::router::{classify, resolve_host, HelloOutcome, HubMessage, Router};
 use crate::sync::{self, Class, DelayLine, SyncState};
+use crate::take::Recorder;
 
 /// A running hub. Dropping it stops the loop.
 pub struct Hub {
@@ -94,8 +95,39 @@ pub struct Extras {
     pub console: Option<RouterConsole>,
 }
 
-/// [`spawn`] with every optional attachment.
+/// What `run --record` / `run --replay` attach to the router.
+#[derive(Default)]
+pub struct Takes {
+    /// `run --record`: every routed message and sync change goes here.
+    pub recorder: Option<Arc<Recorder>>,
+    /// `run --replay`: the replay's signals, routed as [`Src::Replay`].
+    pub replay: Option<Receiver<Message>>,
+}
+
+/// Where a routed message came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Src {
+    /// Received on the OSC port from this address.
+    Net(SocketAddr),
+    /// Made by a generator (MIDI, pad, clock).
+    Hub,
+    /// Played back from a take.
+    Replay,
+}
+
+/// [`spawn`] with every optional attachment but takes.
 pub fn spawn_with(config: Config, generated: Receiver<Message>, quiet: bool, extras: Extras) -> anyhow::Result<Hub> {
+    spawn_with_takes(config, generated, quiet, extras, Takes::default())
+}
+
+/// [`spawn_with`], recording and/or replaying.
+pub fn spawn_with_takes(
+    config: Config,
+    generated: Receiver<Message>,
+    quiet: bool,
+    extras: Extras,
+    takes: Takes,
+) -> anyhow::Result<Hub> {
     let listener = Listener::bind(("0.0.0.0", config.osc.listen_port))
         .with_context(|| format!("binding OSC port {}", config.osc.listen_port))?;
     let addr = listener.local_addr();
@@ -145,10 +177,11 @@ pub fn spawn_with(config: Config, generated: Receiver<Message>, quiet: bool, ext
             if !crate::timing::precise_wakeups() {
                 log::warn!("router: precise timer wakeups refused; delays may land a few ms late");
             }
-            let mut l = Loop::new(&config, router, extras);
+            let mut l = Loop::new(&config, router, extras, takes);
             l.hub_port = addr.port();
             l.resolved = resolved;
-            l.run(&out, net_rx, generated, &malformed, &stop, quiet)
+            let replay = l.replay.take().unwrap_or_else(crossbeam_channel::never);
+            l.run(&out, net_rx, generated, replay, &malformed, &stop, quiet)
         }
     })?;
     Ok(Hub { addr, stop, thread: Some(thread) })
@@ -307,6 +340,8 @@ struct Loop {
     hub_port: u16,
     /// Static destination re-resolve rounds ([`spawn_resolver`]).
     resolved: Receiver<Resolved>,
+    recorder: Option<Arc<Recorder>>,
+    replay: Option<Receiver<Message>>,
 }
 
 /// The router's half of the console: commands in, taps out, the seen
@@ -319,8 +354,13 @@ struct ConsoleSide {
 }
 
 impl Loop {
-    fn new(config: &Config, router: Router, extras: Extras) -> Loop {
+    fn new(config: &Config, router: Router, extras: Extras, takes: Takes) -> Loop {
+        if let Some(r) = &takes.recorder {
+            r.sync(Instant::now(), config.sync.signal_delay_ms, config.sync.td_round_trip_ms);
+        }
         Loop {
+            recorder: takes.recorder,
+            replay: takes.replay,
             router,
             max_packet: config.osc.max_packet,
             audio: extras.audio,
@@ -384,6 +424,7 @@ impl Loop {
         out: &UdpSocket,
         mut net: Receiver<Inbound>,
         mut generated: Receiver<Message>,
+        mut replay: Receiver<Message>,
         malformed: &AtomicU64,
         stop: &AtomicBool,
         quiet: bool,
@@ -404,6 +445,7 @@ impl Loop {
             let wait = self.next_due().map_or(tick, |d| d.saturating_duration_since(Instant::now()).min(tick));
             let mut inbound = None;
             let mut first_gen = None;
+            let mut first_replay = None;
             crossbeam_channel::select! {
                 recv(net) -> r => match r {
                     Ok(i) => inbound = Some(i),
@@ -412,6 +454,10 @@ impl Loop {
                 recv(generated) -> r => match r {
                     Ok(m) => first_gen = Some(m),
                     Err(_) => generated = crossbeam_channel::never(),
+                },
+                recv(replay) -> r => match r {
+                    Ok(m) => first_replay = Some(m),
+                    Err(_) => replay = crossbeam_channel::never(),
                 },
                 recv(cmds) -> r => match r {
                     Ok(c) => self.command(c),
@@ -430,7 +476,11 @@ impl Loop {
             }
             for m in first_gen.into_iter().chain(std::iter::from_fn(|| generated.try_recv().ok())) {
                 self.stats.msgs_in += 1;
-                self.route(&m, None, now);
+                self.route(&m, Src::Hub, now);
+            }
+            for m in first_replay.into_iter().chain(std::iter::from_fn(|| replay.try_recv().ok())) {
+                self.stats.msgs_in += 1;
+                self.route(&m, Src::Replay, now);
             }
             while let Ok(c) = cmds.try_recv() {
                 self.command(c);
@@ -474,6 +524,9 @@ impl Loop {
         match c {
             RouterCmd::Sync(state) => {
                 self.sync = state;
+                if let Some(r) = &self.recorder {
+                    r.sync(Instant::now(), self.sync.sync.signal_delay_ms, self.sync.sync.td_round_trip_ms);
+                }
                 // A device's audio delay follows the round trip and its switch.
                 sync_rtp_targets(self.audio.as_deref(), &self.router, &self.sync);
             }
@@ -515,7 +568,7 @@ impl Loop {
             if let HubMessage::Hello(args) = classify(m) {
                 self.welcome(args);
             }
-            self.route(m, Some(inbound.from), now);
+            self.route(m, Src::Net(inbound.from), now);
         }
     }
 
@@ -530,8 +583,11 @@ impl Loop {
     /// delay → queue. A destination with 0 ms delay and no matching rule
     /// takes exactly the original path: one shared encoding, straight
     /// into this round's datagrams.
-    fn route(&mut self, m: &Message, from: Option<SocketAddr>, now: Instant) {
+    fn route(&mut self, m: &Message, from: Src, now: Instant) {
         let class = sync::class_of(&m.address);
+        if let Some(r) = &self.recorder {
+            r.osc(now, if let Src::Net(a) = from { Some(a) } else { None }, m);
+        }
         let console = &mut self.console;
         if let Some(c) = console.as_mut() {
             tap(c, m, from, class, now);
@@ -660,25 +716,29 @@ impl Loop {
     }
 }
 
-/// Feed the console: every address into the seen table — inbound ones as
-/// `in`, hub-generated ones (`from` = None: /tussen/clock/…,
+/// Feed the console: every address into the seen table — inbound ones
+/// (and replayed ones) as `in`, hub-generated ones (/tussen/clock/…,
 /// /tussen/midi/…) as `out`; MIDI-class signals, and watched OSC
 /// addresses, as timeline events — only while a page is connected.
 /// Timestamps are receipt time, before any delay.
-fn tap(c: &mut ConsoleSide, m: &Message, from: Option<SocketAddr>, class: Class, now: Instant) {
+fn tap(c: &mut ConsoleSide, m: &Message, from: Src, class: Class, now: Instant) {
     if m.address.starts_with("/tussen/hub/") {
         return;
     }
     let ts = console::us_at(now);
     let v = m.args.first().and_then(simply_osc::Value::as_float).unwrap_or(0.0);
-    c.seen.note(&m.address, ts, v, if from.is_some() { console::DIR_IN } else { console::DIR_OUT });
+    c.seen.note(&m.address, ts, v, if from == Src::Hub { console::DIR_OUT } else { console::DIR_IN });
     if !c.link.tap.active() {
         return;
     }
     if class == Class::Midi {
         c.link.tap.send(Event::Midi { ts, addr: m.address.clone(), v });
     } else if c.watch.contains("*") || c.watch.contains(&m.address) {
-        let src = from.map_or_else(|| "hub".to_owned(), |a| a.to_string());
+        let src = match from {
+            Src::Net(a) => a.to_string(),
+            Src::Hub => "hub".to_owned(),
+            Src::Replay => "replay".to_owned(),
+        };
         c.link.tap.send(Event::Osc { ts, addr: m.address.clone(), v, src });
     }
 }
