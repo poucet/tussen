@@ -1,6 +1,6 @@
 //! Save: write the two sync points, the devices' follow
 //! switches and the remap rules back into the config file the hub was
-//! started with — `[sync]` and `[[remap]]` — through
+//! uses (never the repo's shipped example: see [`save_config`]) — `[sync]` and `[[remap]]` — through
 //! `toml_edit`, so every comment and the rest of the file's layout
 //! survive. Values that already exist keep their trailing comments.
 //! The write goes to a sibling temp file first and is renamed over the
@@ -13,7 +13,17 @@ use std::path::Path;
 use anyhow::Context;
 use toml_edit::{value, Array, ArrayOfTables, DocumentMut, Item, Table};
 
+use crate::config_file::ConfigFile;
 use crate::sync::{Follow, SyncState};
+
+/// Save into the config in use — or, if that is the repo's shipped
+/// example, into the user config (a copy of it, then the edit), which the
+/// hub uses from then on. Returns the file written.
+pub fn save_config<'a>(config: &'a mut ConfigFile, state: &SyncState) -> anyhow::Result<&'a Path> {
+    let path = config.save_target()?;
+    save(path, state)?;
+    Ok(path)
+}
 
 /// Read `path`, update its `[sync]` + `[[remap]]`, write it back.
 pub fn save(path: &Path, state: &SyncState) -> anyhow::Result<()> {
@@ -241,6 +251,32 @@ port = 9098                  # loopback only
         assert!(saved.contains("signal_delay_ms = 70          # MIDI + OSC wait"), "{saved}");
         let reloaded: Config = toml::from_str(&saved).unwrap();
         assert_eq!(reloaded.sync, state.sync);
+    }
+
+    #[test]
+    fn save_from_the_repo_fallback_goes_to_the_user_config() {
+        use crate::config_file::{tests::{layout, scratch}, Source};
+        let root = scratch("save-redirect");
+        let env = layout(&root);
+        let repo = env.repo_path().unwrap();
+        std::fs::write(&repo, ORIGINAL).unwrap();
+        let mut config = ConfigFile::resolve(None, &env).unwrap();
+        assert_eq!(config.source, Source::Repo);
+        let mut state = SyncState::new(SyncConfig::default(), vec![]);
+        state.set_sync(Some(33), None);
+        let written = save_config(&mut config, &state).unwrap().to_path_buf();
+        assert_eq!(written, env.user_path().unwrap());
+        assert_eq!(config.source, Source::User);
+        assert_eq!(std::fs::read_to_string(&repo).unwrap(), ORIGINAL, "the repo file changed");
+        let user = std::fs::read_to_string(&written).unwrap();
+        assert!(user.contains("# the stage config — keep me"), "{user}");
+        assert!(user.contains("signal_delay_ms = 33          # sync point 1"), "{user}");
+        // The next save goes to the same user file.
+        state.set_sync(None, Some(44));
+        save_config(&mut config, &state).unwrap();
+        assert_eq!(Config::load(&written).unwrap().sync.td_round_trip_ms, 44);
+        assert_eq!(std::fs::read_to_string(&repo).unwrap(), ORIGINAL);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

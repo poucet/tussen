@@ -23,11 +23,10 @@ mod save;
 mod server;
 
 pub use protocol::{parse_request, OscEndpoint, Request};
-pub use save::{save, write_into};
+pub use save::{save, save_config, write_into};
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -35,6 +34,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 use serde::Serialize;
 
+use crate::config_file::ConfigFile;
 use crate::sync::{DestKind, SyncState};
 
 /// Capacity of the tap channel (router + audio → console thread).
@@ -288,8 +288,9 @@ pub struct ConsoleOptions {
     /// The port OSC senders send to (`[osc] listen_port`), shown on the
     /// page next to the hub's LAN IP.
     pub osc_port: u16,
-    /// The config file the hub was started with — where Save writes.
-    pub config_path: Option<PathBuf>,
+    /// The config file the hub was started with — where Save writes
+    /// (redirected to the user config if it is the repo's example).
+    pub config: Option<ConfigFile>,
     /// Static destinations in config order, with their kinds.
     pub statics: Vec<(String, DestKind)>,
     /// The audio stream's sample rate (for `hello`).
@@ -357,7 +358,7 @@ pub fn start(opts: ConsoleOptions) -> anyhow::Result<(Console, RouterConsole)> {
             clients: HashMap::new(),
             router: cmd_tx,
             tap: Arc::clone(&tap),
-            config_path: opts.config_path,
+            config: opts.config,
             sample_rate: opts.sample_rate,
             link: link_tx,
         };
@@ -383,7 +384,7 @@ struct ConsoleHub {
     clients: HashMap<u64, Client>,
     router: Sender<RouterCmd>,
     tap: Arc<Tap>,
-    config_path: Option<PathBuf>,
+    config: Option<ConfigFile>,
     sample_rate: u32,
     link: Sender<crate::link::LinkCmd>,
 }
@@ -552,11 +553,11 @@ impl ConsoleHub {
                 }
             }
             Request::Save => {
-                let reply = match &self.config_path {
+                let reply = match &mut self.config {
                     None => protocol::saved(Err("the hub was started without a config file")),
-                    Some(path) => match save(path, &self.state) {
-                        Ok(()) => {
-                            let shown = path.canonicalize().unwrap_or_else(|_| path.clone());
+                    Some(config) => match save_config(config, &self.state) {
+                        Ok(path) => {
+                            let shown = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
                             log::info!("console: saved sync + remap to {}", shown.display());
                             protocol::saved(Ok(&shown.display().to_string()))
                         }

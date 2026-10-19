@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+#### Your hub config lives in ~/.config, not in the repo · 2026-10-20 00:02 · quplzywy
+
+- **The hub reads `~/.config/tussen/hub.toml`** (`$XDG_CONFIG_HOME/tussen/hub.toml`
+  if set; macOS too) before the repo's `hub.toml`, which is now the shipped
+  example and the fallback. Order: `--config`, your config, the repo's.
+  The startup log says which (`config: <path> (user)`).
+- **Console Save never writes into the repo.** Running on the repo's example,
+  Save copies it (comments and all) to your config path, applies the edit
+  there and uses that file from then on; the console's "saved →" shows it.
+- `tussen-hub config path` prints the file the hub would use and why;
+  `tussen-hub config init` copies the repo's `hub.toml` to your config path
+  (never overwrites). `./tussen` reads its ports from the same file.
+
 ## 1.0.0 — 2026-10-19
 
 #### Ableton Link: the hub waits for a session instead of founding one · 2026-10-19 20:09 · qvpsqvxx

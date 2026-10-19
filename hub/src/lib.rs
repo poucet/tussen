@@ -15,6 +15,7 @@
 pub mod bundles;
 pub mod catalog;
 pub mod config;
+pub mod config_file;
 pub mod console;
 pub mod fake;
 pub mod generators;

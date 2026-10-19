@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# ./tussen [args…] — build the hub, start it with the repo's hub.toml, print the
-# console URL and the OSC endpoint, open the console; Ctrl-C stops it.
+# ./tussen [args…] — build the hub, start it, print the console URL and the OSC
+# endpoint, open the console; Ctrl-C stops it. The config is the hub's own pick
+# (`tussen-hub config path`): --config, else ~/.config/tussen/hub.toml (or
+# $XDG_CONFIG_HOME/tussen/hub.toml), else the repo's hub.toml.
 #
 # Args pass through to `tussen-hub run`: --fake-midi, --fake-pad (no hardware needed),
 # --audio-device <name>, --config <path>. TUSSEN_NO_OPEN=1 skips opening the console.
@@ -17,11 +19,12 @@ build_hub() {
   (cd "$ROOT/hub" && cargo build --release --quiet)
 }
 
-# The hub config in use: --config <path> from the args, else the repo's hub.toml.
+# The hub config in use, as the hub resolves it: `<path> (<source>)` → `<path>`.
 hub_config() {
-  local cfg="$ROOT/hub.toml" prev=""
-  for a in "$@"; do [ "$prev" = "--config" ] && cfg="$a"; prev="$a"; done
-  echo "$cfg"
+  local flag=() prev="" line
+  for a in "$@"; do [ "$prev" = "--config" ] && flag=(--config "$a"); prev="$a"; done
+  line="$(cd "$ROOT" && "$HUB" config path ${flag[@]+"${flag[@]}"})" || return 0
+  echo "${line% (*}"
 }
 
 # `key` from `[section]` of a TOML file (first match; plain `key = value` lines only).

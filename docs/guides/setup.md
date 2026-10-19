@@ -46,8 +46,12 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    output still plays). `""` taps the default output — fine on one machine,
    where the music software plays locally. With a mixer, name the
    interface, or a loopback device carrying its input.
-2. **Edit `hub.toml`** — three lines for a room, each with a commented
-   example under it:
+2. **Edit your config** — `tussen-hub config init` copies the repo's
+   `hub.toml` (the shipped example) to `~/.config/tussen/hub.toml`
+   (`$XDG_CONFIG_HOME/tussen/hub.toml` if that is set), and the hub reads
+   that file from then on; `tussen-hub config path` prints which file it
+   would use. Three lines for a room, each with a commented example under
+   it:
 
    | Section | One machine (as shipped) | A room |
    |---|---|---|
@@ -198,7 +202,9 @@ also why the room's `hub.toml` needs the visuals laptop's real name, not
 ## Soundcheck, in the console
 
 Open <http://127.0.0.1:9098> on the hub laptop. Changes apply at once;
-**Save** writes them into `hub.toml`, comments kept. To practise without a
+**Save** writes them into your config, comments kept — never into the
+repo: if the hub was running the repo's `hub.toml`, Save copies it to
+`~/.config/tussen/hub.toml` first and uses that file from then on. To practise without a
 hub, open `hub/console/index.html?mock=1` (a fake hub whose MIDI leads its
 kicks by 70 ms; `&lead=<ms>` changes that).
 

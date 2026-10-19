@@ -1,10 +1,10 @@
 //! `tussen-hub run` — load the config, start the generators, run the
 //! router until killed.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use tussen_hub::config::Config;
+use tussen_hub::config_file::ConfigFile;
 use tussen_hub::console::{self, ConsoleOptions};
 use tussen_hub::sync::SyncState;
 use tussen_hub::generators::audio::{AudioGenerator, AudioLink};
@@ -19,12 +19,13 @@ use tussen_hub::pad;
 const FAKE_MIDI_SEED: u64 = 0x7475_7373; // "tuss"
 
 pub fn run(
-    config_path: &Path,
+    config_file: ConfigFile,
     fake_midi: bool,
     fake_pad: bool,
     audio_device: Option<&str>,
 ) -> anyhow::Result<()> {
-    let mut config = Config::load(config_path)?;
+    log::info!("config: {config_file}");
+    let mut config = Config::load(&config_file.path)?;
     if let Some(device) = audio_device {
         config.audio.device = device.to_owned();
     }
@@ -64,7 +65,7 @@ pub fn run(
         match console::start(ConsoleOptions {
             port: config.console.port,
             osc_port: config.osc.listen_port,
-            config_path: Some(config_path.to_path_buf()),
+            config: Some(config_file),
             statics: config.dests.iter().map(|d| (d.name.clone(), d.kind())).collect(),
             sample_rate: config.audio.sample_rate,
             state: SyncState::new(config.sync.clone(), config.remap.clone()),

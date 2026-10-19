@@ -13,6 +13,7 @@ use simply_osc::{Message, Value};
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::WebSocket;
 use tussen_hub::config::Config;
+use tussen_hub::config_file::{ConfigFile, Source};
 use tussen_hub::console::{self, ConsoleOptions};
 use tussen_hub::hub::{self, Extras};
 use tussen_hub::sync::SyncState;
@@ -316,7 +317,7 @@ port = 0
     let (console, router_side) = console::start(ConsoleOptions {
         port: 0,
         osc_port: 9000,
-        config_path: Some(path.clone()),
+        config: Some(ConfigFile { path: path.clone(), source: Source::Flag, user_path: None }),
         statics: config.dests.iter().map(|d| (d.name.clone(), d.kind())).collect(),
         sample_rate: 48000,
         state: SyncState::new(config.sync.clone(), config.remap.clone()),
@@ -537,7 +538,7 @@ fn a_second_local_page_reads_the_feed_but_cannot_command() {
     let (console, router_side) = console::start(ConsoleOptions {
         port: 0,
         osc_port: 9000,
-        config_path: None,
+        config: None,
         statics: config.dests.iter().map(|d| (d.name.clone(), d.kind())).collect(),
         sample_rate: 48000,
         state: SyncState::new(config.sync.clone(), config.remap.clone()),

@@ -29,11 +29,18 @@ same signals the musicians play; bring any OSC consumer.
 
 ```sh
 cd hub && cargo build --release
-./target/release/tussen-hub run            # reads hub.toml at the repo root
+./target/release/tussen-hub config init    # copy hub.toml to ~/.config/tussen/hub.toml
+./target/release/tussen-hub run            # reads your config, else the repo's hub.toml
 ```
 
 Or, from the repo root, `./tussen` does both, then prints the console
 URL and the OSC endpoint and opens the console.
+
+Your config lives in `~/.config/tussen/hub.toml` (`$XDG_CONFIG_HOME/tussen/`
+if set, macOS too), so you can edit it without touching the checkout. Until
+it exists the hub runs the repo's `hub.toml`, the shipped example, and the
+console's **Save** creates your file from it rather than writing into the
+repo. `tussen-hub config path` says which file the hub would use.
 
 No hardware needed to try it: `tussen-hub run --fake-midi --fake-pad` (or
 `./tussen --fake-midi --fake-pad`) invents a controller and a gamepad. The hub prints one stats line a second:
@@ -100,8 +107,10 @@ commented. The short version:
 | `[[remap]]` | per-destination address rewrites with optional range mapping — the console writes these |
 | `[console]` | the console port (loopback only) |
 
-`--config <path>` points at another file; without it the nearest `hub.toml`
-up from the current directory wins. `--audio-device "<name>"` overrides
+Which file: `--config <path>` if given, else your user config
+(`~/.config/tussen/hub.toml`, or under `$XDG_CONFIG_HOME`), else the nearest
+`hub.toml` up from the current directory — the repo's shipped example. The
+hub logs its pick at startup (`config: <path> (user)`). `--audio-device "<name>"` overrides
 `[audio] device` for one run.
 
 ## The console
@@ -111,7 +120,9 @@ Middle: the signal timeline — audio waveform, MIDI markers, the beat grid —
 plus the anchored alignment strip for setting the signal delay by eye or by
 drag. Right: every address ever seen (direction, min/max, rate), remap rules,
 and the osc-traffic tab: a live scrolling feed of every message. **Save**
-writes the sync and remap state back into `hub.toml`, comments intact.
+writes the sync and remap state back into the config in use, comments
+intact — into your user config if the hub was running the repo's example (it
+copies the example there first, then uses that file).
 
 ## Reading the signals from your own code
 

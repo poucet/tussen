@@ -6,6 +6,7 @@ mod cmd;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use tussen_hub::config_file::{self, ConfigFile, Env};
 
 #[derive(Parser)]
 #[command(name = "tussen-hub", about = "The tussen OSC router")]
@@ -18,8 +19,10 @@ struct Cli {
 enum Command {
     /// Run the router: OSC in on :9000, delivery by subscription.
     Run {
-        /// The hub config. Default: the nearest `hub.toml` in the current
-        /// directory or a parent (the repo root's, from anywhere in the repo).
+        /// The hub config. Default: the user config
+        /// ($XDG_CONFIG_HOME/tussen/hub.toml, else ~/.config/tussen/hub.toml),
+        /// else the nearest `hub.toml` in the current directory or a parent
+        /// (the repo's shipped example; console Save then writes the user config).
         #[arg(long)]
         config: Option<PathBuf>,
         /// Publish deterministic random CCs and notes instead of opening
@@ -33,6 +36,12 @@ enum Command {
         /// Override the config's [audio] device ("" = the default output).
         #[arg(long)]
         audio_device: Option<String>,
+    },
+    /// Where the hub config lives: `config path` prints the one `run`
+    /// would use, `config init` copies the repo's hub.toml to the user config.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
     },
     /// What this machine offers the generators: the audio devices (inputs
     /// and outputs) and the MIDI input ports.
@@ -95,15 +104,24 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Print the config `run` would use and where it came from (--config, user, repo).
+    Path {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Copy the repo's hub.toml (the shipped example outside a checkout)
+    /// to the user config. Never overwrites.
+    Init,
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match Cli::parse().command {
         Command::Run { config, fake_midi, fake_pad, audio_device } => {
-            let config = match config {
-                Some(path) => path,
-                None => find_hub_toml()?,
-            };
-            cmd::run::run(&config, fake_midi, fake_pad, audio_device.as_deref())
+            let config = ConfigFile::resolve(config, &Env::from_process()?)?;
+            cmd::run::run(config, fake_midi, fake_pad, audio_device.as_deref())
         }
         Command::Monitor { port, filter } => cmd::monitor::run(port, filter.as_deref()),
         Command::FakeDevice { name, pattern, hub } => cmd::fake_device::run(&name, pattern, &hub),
@@ -112,19 +130,18 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Sdp { to, sample_rate, channels } => cmd::sdp::run(&to, sample_rate, channels),
         Command::List => cmd::list::run(),
-    }
-}
-
-/// The nearest `hub.toml` walking up from the current directory.
-fn find_hub_toml() -> anyhow::Result<PathBuf> {
-    let mut dir = std::env::current_dir()?;
-    loop {
-        let candidate = dir.join("hub.toml");
-        if candidate.is_file() {
-            return Ok(candidate);
+        Command::Config { action: ConfigAction::Path { config } } => {
+            println!("{}", ConfigFile::resolve(config, &Env::from_process()?)?);
+            Ok(())
         }
-        if !dir.pop() {
-            anyhow::bail!("no hub.toml in this directory or any parent; pass --config <path>");
+        Command::Config { action: ConfigAction::Init } => {
+            let env = Env::from_process()?;
+            let to = env.user_path().ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
+            let from = env.repo_path();
+            config_file::init(from.as_deref(), &to)?;
+            let what = from.map_or("the shipped example".into(), |p| p.display().to_string());
+            println!("copied {what} to {}", to.display());
+            Ok(())
         }
     }
 }
