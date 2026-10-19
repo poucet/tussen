@@ -21,6 +21,18 @@ port = 3928                  # your music software's OSC input port
 subscribe = ["/tussen/", "/ext/", "/djay/"]
 exclude = ["/tussen/midi/", "/tussen/clock/", "/tussen/hub/"]
 
+# djay Pro: OSC *into* djay (Settings ▸ OSC ▸ input). It makes music, so it's
+# never delayed (kind = "engine"). Not /djay/: that's what djay sends the hub,
+# and echoing it back would be a loop. Tempo reaches djay over Link, not OSC.
+[[dest]]
+name = "djay"
+kind = "engine"
+host = "127.0.0.1"
+# host = "dj-laptop.local"
+port = 9010                  # djay Pro ▸ Settings ▸ OSC input port: match it
+subscribe = ["/tussen/", "/ext/"]
+exclude = ["/tussen/midi/", "/tussen/clock/", "/tussen/hub/"]
+
 # `name = "td"` is a visuals destination: its signals wait for the returning
 # music ([sync] signal_delay_ms), and it can take the hub's audio as RTP
 # (rtp_port). Works for TouchDesigner, or anything with an OSC input and a
