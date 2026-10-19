@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+#### Console: click the Link peer count to see who is connected · 2026-10-19 20:00 · prsmntlt
+
+- **The "Link N peers" field at the top of the console now opens a list**
+  of every Link peer the hub hears: where it runs (its hostname when the
+  network can name it, its address, or "this machine"), whether it is in
+  the hub's session or another one, its tempo and transport, and how long
+  ago it was last heard. Click the count again, click elsewhere or press
+  Escape to close it. With nobody around it says "no Link peers".
+- Link itself does not say which app a peer is, so the list can show
+  where each one runs but not its name; two apps on one laptop are two
+  rows with the same host, told apart by their Link node id.
+- Hostnames come from reverse DNS, looked up in the background and
+  cached, so a slow lookup never holds up the beat. Needs `simply-link`
+  with `Link::peers` (music-rs, unreleased).
+
 #### Ableton Link: late joiners connect, and the hub follows their tempo · 2026-10-19 19:45 · wzknykvm
 
 - **A Link app switched on after the hub now joins it.** Before, a DJ app

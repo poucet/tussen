@@ -70,10 +70,18 @@ epoch for all frames — deltas are meaningful, the absolute value is not).
 | `osc` | `{"t":"osc","ts":…,"addr":"/ext/x","v":0.5,"src":"127.0.0.1:5000"}` | per message, as routed — watched addresses only; hub-made signals (`/tussen/clock/…`, `/tussen/pad/…`) carry `"src":"hub"` |
 | `midi` | `{"t":"midi","ts":…,"addr":"/tussen/midi/cc/74","v":0.5}` | per MIDI-derived signal, always (no watch needed) |
 | `addrs` | `{"t":"addrs","list":[{"addr":"/ext/x","last_ts":…,"rate":2.5,"v":0.5,"min":0,"max":1,"count":12,"dir":"in"}]}` | ~2 Hz; every address since hub start, sorted, permanent; `dir` ∈ `in`/`out`/`both` |
-| `link` | `{"t":"link","ts":…,"beat":2.5,"bpm":120,"quantum":4,"playing":true,"peers":1}` | on Link status change |
+| `link` | `{"t":"link","ts":…,"beat":2.5,"bpm":120,"quantum":4,"playing":true,"peers":1,"peer_list":[…]}` | ~4 Hz and on Link status change; `peers` counts the others in the hub's session, `peer_list` is every peer heard (below) |
 | `audio` | `{"t":"audio","ts":…,"blocks":[[min,max,rms],…]}` | ~30 Hz; per-RTP-packet level summaries — the console's waveform, **not** audio data |
 | `dests` | `{"t":"dests","dests":[…]}` | when a device registers or leaves |
 | `saved` | `{"t":"saved","ok":true,"path":"…"}` | reply to the console's save |
+
+**Link peers.** Each `peer_list` entry is one Link peer:
+`{"node":"Qx7#kP2a","session":"…","in_session":true,"host":"192.0.2.21","hostname":"dj-laptop.local","local":false,"bpm":120,"playing":true,"age_ms":40}`
+— `node` is its Link node id, `host` the address it is heard from (absent if
+none), `hostname` that address's reverse-DNS name once known (absent until
+then, and for `local` peers, which run on the hub's machine), `playing` its
+start/stop state (absent if it never set one), `age_ms` how long ago it was
+last heard. Link does not say which app a peer is.
 
 **Rates.** `watch "*"` is per-message: with devices publishing at 60 Hz plus
 MIDI, expect hundreds of frames a second — batch your reads per animation

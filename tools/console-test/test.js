@@ -171,7 +171,7 @@ const HUB_SPEC = {
   osc: ['ts', 'addr', 'v', 'src'],
   addrs: ['list'],
   saved: ['ok'],
-  link: ['ts', 'beat', 'bpm', 'quantum', 'playing', 'peers'],
+  link: ['ts', 'beat', 'bpm', 'quantum', 'playing', 'peers', 'peer_list'],
 };
 const run = runMock({}, 25, (hub, el) => {
   if (el === 15e3) hub.onMessage(L.msg.watch(['/ext/tablet/fader1', '/tussen/quest/controller/trigger']));
@@ -195,6 +195,11 @@ for (const m of run.msgs) {
   if (m.t === 'hello') for (const r of m.remaps) { for (const k of ['id', 'dest', 'from', 'to', 'keep']) if (!(k in r)) shapeErr = 'remap missing ' + k; if ('range' in r && r.range.length !== 2) shapeErr = 'remap range'; }
   if (m.t === 'audio') for (const b of m.blocks) if (b.length !== 3 || !(b[0] <= b[1]) || b[2] < 0) shapeErr = 'audio block ' + JSON.stringify(b);
   if (m.t === 'link' && !(['ts', 'beat', 'bpm', 'quantum'].every(k => typeof m[k] === 'number') && typeof m.playing === 'boolean' && Number.isInteger(m.peers))) shapeErr = 'link types ' + JSON.stringify(m);
+  if (m.t === 'link') for (const p of m.peer_list) {
+    if (!(typeof p.node === 'string' && typeof p.session === 'string' && typeof p.in_session === 'boolean' && typeof p.local === 'boolean' && typeof p.bpm === 'number' && Number.isInteger(p.age_ms))) shapeErr = 'link peer types ' + JSON.stringify(p);
+    for (const k of ['host', 'hostname', 'playing']) if (k in p && p[k] === null) shapeErr = 'link peer ' + k + ' must be absent, not null';
+  }
+  if (m.t === 'link' && m.peers !== m.peer_list.filter(p => p.in_session).length) shapeErr = 'link peers = in-session peer_list entries: ' + JSON.stringify(m);
   if (m.t === 'addrs') for (const a of m.list) {
     for (const k of ['addr', 'last_ts', 'rate', 'v', 'min', 'max', 'count']) if (!(k in a)) shapeErr = 'addrs entry missing ' + k;
     if (!['in', 'out', 'both'].includes(a.dir)) shapeErr = 'addrs entry dir must be in|out|both: ' + JSON.stringify(a);
@@ -310,7 +315,7 @@ section('Link');
 {
   const lk = run.msgs.filter(m => m.t === 'link');
   ok(Math.abs(lk.length / 25 - 4) < 0.3, 'mock sends link at ~4 Hz', lk.length);
-  ok(lk.every(m => m.quantum === 4 && m.playing === true && m.peers === 1 && m.bpm === 120), 'mock link: 120 bpm, quantum 4, playing, 1 peer');
+  ok(lk.every(m => m.quantum === 4 && m.playing === true && m.peers === 2 && m.bpm === 120), 'mock link: 120 bpm, quantum 4, playing, 2 peers in session');
   // every link message's beat line puts beat k on the k-th note-on (kick - leadMs)
   let worst = 0;
   for (const m of lk) for (const k of [0, 10, 40]) worst = Math.max(worst, Math.abs(m.beat + (run.hub.kickTimeUs(k) - 70e3 - m.ts) * m.bpm / 60e6 - k));
@@ -344,6 +349,31 @@ section('Link');
   for (let i = 0; i < 300; i++) L.applyMessage(S5, { t: 'link', ts: 3e6 + i * 250e3, beat: 0, bpm: 120, quantum: 4, playing: true, peers: 1 }, 400);
   ok(S5.links.length === L.LINK_KEEP, 'link history capped', S5.links.length);
   ok(L.beatGrid([], 0, 1e6, 0).length === 0, 'no Link, no grid');
+}
+{ // the peer list: carried on `link`, normalised, rendered as display rows
+  ok(run.S.linkPeers.length === 3, 'mock: three peers in the latest link', run.S.linkPeers.length);
+  const rows = L.peerRows(run.S.linkPeers);
+  ok(rows.map(r => r.name).join() === 'dj-laptop.local,this machine,192.0.2.33', 'rows named by hostname, this machine, else address', rows.map(r => r.name));
+  ok(rows[0].addr === '192.0.2.21' && rows[1].addr === '192.0.2.10' && rows[2].addr === '', 'the address beside a name; not repeated when it is the name');
+  ok(rows.map(r => r.session).join() === 'in session,in session,other session', 'in / out of the session');
+  ok(rows[0].tempo === '120.0 bpm ▶' && rows[2].tempo === '98.0 bpm ■', 'tempo and transport', rows.map(r => r.tempo));
+  ok(rows[0].seen === 'now' && /^1\.\d s ago$/.test(rows[2].seen), 'last seen', rows.map(r => r.seen));
+  ok(L.peerSummary(run.S.linkPeers) === "2 in the hub's session, 1 in another", 'summary line', L.peerSummary(run.S.linkPeers));
+  // optional fields absent; junk tolerated; no peer_list = no peers
+  const n = L.normPeers([{ node: 'a', session: 's', in_session: true, local: false, bpm: 100, age_ms: 0 }, null, 7]);
+  ok(n.length === 1 && n[0].host === null && n[0].hostname === null && n[0].playing === null, 'normPeers: absent fields are null, junk dropped', n);
+  ok(L.peerRows(n)[0].name === 'unknown host' && L.peerRows(n)[0].tempo === '100.0 bpm', 'a peer with no address');
+  const S8 = L.createState();
+  L.applyMessage(S8, { t: 'link', ts: 1, beat: 0, bpm: 120, quantum: 4, playing: true, peers: 0 }, 0);
+  ok(Array.isArray(S8.linkPeers) && S8.linkPeers.length === 0, 'a link without peer_list: no peers');
+  L.applyMessage(S8, { t: 'link', ts: 2, beat: 0, bpm: 120, quantum: 4, playing: true, peers: 1, peer_list: [{ node: 'x', session: 's', in_session: true, host: '192.0.2.5', local: false, bpm: 120, age_ms: 2500 }] }, 0);
+  ok(S8.linkPeers.length === 1 && L.peerRows(S8.linkPeers)[0].seen === '2.5 s ago', 'the latest link replaces the list');
+  L.resetBuffers(S8);
+  ok(S8.linkPeers.length === 0, 'reset forgets the peers');
+  for (const [k, want] of [[0, 0], [1, 1], [2, 2]]) {
+    const r = runMock({ peers: k }, 1), last = r.msgs.filter(m => m.t === 'link').pop();
+    ok(last.peer_list.length === k && last.peers === want, 'mock peers=' + k, last);
+  }
 }
 { // set_tempo / set_playing through the mock: reported bpm/playing follow, beat line stays continuous
   const r = runMock({}, 3, (hub, el) => { if (el === 1.5e6) { hub.onMessage(L.msg.setTempo(90)); hub.onMessage(L.msg.setPlaying(false)); } });

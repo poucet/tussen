@@ -33,16 +33,24 @@
 //! beat 0, so it holds a millisecond's precision for over 9 hours at
 //! 120 BPM.
 //!
-//! The pure parts — [`sample`], [`Beats`], [`next_wake`] — take a
-//! [`SessionState`] and a host time, so the tests drive them from a fake
+//! **Peers.** The console's `link` frame also lists every Link peer the hub
+//! hears ([`peer_rows`]): where it is (the address it is heard from, a
+//! name for it by reverse DNS, or "this machine"), whether it is in the
+//! hub's session, its tempo and transport, and how long ago it was last
+//! heard. Link's messages carry no application name, so which app a peer
+//! is cannot be shown — only where it runs.
+//!
+//! The pure parts — [`sample`], [`Beats`], [`next_wake`], [`peer_rows`] —
+//! take plain data and a host time, so the tests drive them from a fake
 //! Link timeline with no sockets.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
-use serde::Deserialize;
-use simply_link::{Link, Micros, SessionState};
+use serde::{Deserialize, Serialize};
+use simply_link::{Link, Micros, Network, PeerInfo, SessionState};
 use simply_osc::{Message, Value};
 
 use crate::console::{self, Event, Tap};
@@ -84,7 +92,7 @@ pub enum LinkCmd {
 }
 
 /// What the console page draws the beat grid from (the `link` frame).
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LinkStatus {
     /// Hub clock µs ([`console::now_us`]).
     pub ts: u64,
@@ -93,7 +101,87 @@ pub struct LinkStatus {
     pub bpm: f64,
     pub quantum: f64,
     pub playing: bool,
+    /// Other peers in the hub's session.
     pub peers: usize,
+    /// Every peer heard, in or out of the session ([`peer_rows`]).
+    pub peer_list: Vec<PeerRow>,
+}
+
+/// One Link peer as the console lists it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PeerRow {
+    /// Link's node id — what tells two peers on one host apart.
+    pub node: String,
+    /// The session it announces.
+    pub session: String,
+    /// Is it in the hub's session?
+    pub in_session: bool,
+    /// The address it is heard from: its LAN address if it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// The host's name by reverse DNS, once known (never for `local`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    /// Running on the hub's own machine.
+    pub local: bool,
+    pub bpm: f64,
+    /// Its start/stop state; absent if it never set one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playing: Option<bool>,
+    /// How long ago it was last heard.
+    pub age_ms: u64,
+}
+
+/// The console's rows for `peers` at host time `now`: in-session peers
+/// first, then by host. A peer is `local` if it is heard over loopback or
+/// from one of `own` (this machine's addresses); its `host` is the first
+/// non-loopback address it is heard from, and `name` is asked for that
+/// address's hostname (only for peers on other machines).
+pub fn peer_rows(
+    peers: &[PeerInfo],
+    now: Micros,
+    own: &[IpAddr],
+    name: impl Fn(IpAddr) -> Option<String>,
+) -> Vec<PeerRow> {
+    let mut rows: Vec<PeerRow> = peers
+        .iter()
+        .map(|p| {
+            let from = || p.paths.iter().map(|h| h.from);
+            let local = from().any(|ip| ip.is_loopback() || own.contains(&ip));
+            let host = from().find(|ip| !ip.is_loopback()).or_else(|| from().next());
+            PeerRow {
+                node: p.node.to_string(),
+                session: p.session.to_string(),
+                in_session: p.in_session,
+                host: host.map(|ip| ip.to_string()),
+                hostname: host.filter(|_| !local).and_then(&name),
+                local,
+                bpm: p.timeline.bpm(),
+                playing: p.start_stop.map(|s| s.playing),
+                age_ms: (now - p.heard).max(0) as u64 / 1000,
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| (!a.in_session, &a.host, &a.node).cmp(&(!b.in_session, &b.host, &b.node)));
+    rows
+}
+
+/// This machine's addresses, re-read every [`simply_link::RESCAN`] — what
+/// tells a peer on the hub's own machine from one across the room.
+struct OwnAddrs {
+    ips: Vec<IpAddr>,
+    read: Option<Instant>,
+}
+
+impl OwnAddrs {
+    fn get(&mut self) -> &[IpAddr] {
+        if self.read.is_none_or(|t| t.elapsed() >= simply_link::RESCAN) {
+            self.ips =
+                simply_link::interfaces(&Network::default()).iter().map(|i| IpAddr::V4(i.addr)).collect();
+            self.read = Some(Instant::now());
+        }
+        &self.ips
+    }
 }
 
 /// The continuous clock signals at one instant.
@@ -253,6 +341,8 @@ fn run_link(link: &Link, config: &LinkConfig, cmds: &Receiver<LinkCmd>, tap: Opt
     let mut last_console = Instant::now() - CONSOLE_PERIOD;
     let mut last_status: Option<(String, usize)> = None;
     let mut logged_bpm = (0.0, Instant::now());
+    let names = crate::rdns::Names::system();
+    let mut own = OwnAddrs { ips: Vec::new(), read: None };
     loop {
         let mut changed = false;
         // The only place the hub proposes anything: a human's console
@@ -303,6 +393,7 @@ fn run_link(link: &Link, config: &LinkConfig, cmds: &Receiver<LinkCmd>, tap: Opt
                         quantum: config.quantum,
                         playing: s.running,
                         peers: state.peers,
+                        peer_list: peer_rows(&link.peers(), now, own.get(), |ip| names.get(ip)),
                     }));
                 }
             }
@@ -442,6 +533,70 @@ mod tests {
         // session; `clamp` is a pure function).
         let after_merge = session(110.0, 0, Some(true));
         assert!((sample(&after_merge, 0).unwrap().bpm - 110.0).abs() < 1e-3);
+    }
+
+    fn peer(node: &[u8; 8], session: &[u8; 8], in_session: bool, from: &[&str], heard: Micros) -> PeerInfo {
+        PeerInfo {
+            node: NodeId(*node),
+            session: NodeId(*session),
+            in_session,
+            timeline: Timeline::at(98.0, 0.0, 0),
+            start_stop: None,
+            paths: from
+                .iter()
+                .map(|ip| simply_link::PeerPath {
+                    from: ip.parse().unwrap(),
+                    endpoint: format!("{ip}:20808").parse().unwrap(),
+                })
+                .collect(),
+            heard,
+        }
+    }
+
+    /// The peer list: in-session first; a peer on this machine (over
+    /// loopback, or from one of our own addresses) is `local` and never
+    /// looked up; one across the room shows its LAN address and its name;
+    /// the age is from the last time it was heard.
+    #[test]
+    fn the_console_lists_every_peer_and_where_it_is() {
+        let own: Vec<IpAddr> = vec!["127.0.0.1".parse().unwrap(), "192.0.2.10".parse().unwrap()];
+        let asked = std::cell::RefCell::new(Vec::new());
+        let name = |ip: IpAddr| {
+            asked.borrow_mut().push(ip);
+            (ip.to_string() == "192.0.2.21").then(|| "laptop.local".to_owned())
+        };
+        let mut stranger = peer(b"stranger", b"otherses", false, &["192.0.2.33"], 9_000_000);
+        stranger.start_stop = Some(StartStop { playing: false, beats: 0, timestamp: 0 });
+        let peers = [
+            stranger,
+            peer(b"laptop!!", b"session1", true, &["192.0.2.21"], 9_750_000),
+            // On this machine: heard over loopback and over the LAN.
+            peer(b"djay-app", b"session1", true, &["127.0.0.1", "192.0.2.10"], 10_000_000),
+            peer(b"own-lan!", b"session1", true, &["192.0.2.10"], 10_000_000),
+        ];
+        let rows = peer_rows(&peers, 10_000_000, &own, name);
+        let summary: Vec<_> = rows
+            .iter()
+            .map(|r| (r.node.as_str(), r.in_session, r.host.as_deref(), r.hostname.as_deref(), r.local, r.age_ms))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("djay-app", true, Some("192.0.2.10"), None, true, 0),
+                ("own-lan!", true, Some("192.0.2.10"), None, true, 0),
+                ("laptop!!", true, Some("192.0.2.21"), Some("laptop.local"), false, 250),
+                ("stranger", false, Some("192.0.2.33"), None, false, 1000),
+            ]
+        );
+        let asked: Vec<String> = asked.into_inner().iter().map(IpAddr::to_string).collect();
+        assert_eq!(asked, ["192.0.2.33", "192.0.2.21"], "only remote hosts are looked up");
+        assert!((rows[0].bpm - 98.0).abs() < 1e-3);
+        assert_eq!((rows[0].playing, rows[3].playing), (None, Some(false)));
+        // Only loopback: it is that address, and local. No path: no host.
+        let lo = peer_rows(&[peer(b"loopback", b"session1", true, &["127.0.0.1"], 0)], 0, &[], |_| None);
+        assert_eq!((lo[0].host.as_deref(), lo[0].local), (Some("127.0.0.1"), true));
+        let none = peer_rows(&[peer(b"nopath!!", b"session1", true, &[], 0)], 0, &[], |_| None);
+        assert_eq!((none[0].host.as_deref(), none[0].local), (None, false));
     }
 
     #[test]

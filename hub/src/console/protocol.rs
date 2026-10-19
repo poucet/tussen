@@ -80,6 +80,7 @@ pub fn link(s: &crate::link::LinkStatus) -> String {
     json!({
         "t": "link", "ts": s.ts, "beat": s.beat, "bpm": s.bpm,
         "quantum": s.quantum, "playing": s.playing, "peers": s.peers,
+        "peer_list": s.peer_list,
     })
     .to_string()
 }
@@ -245,11 +246,41 @@ mod tests {
             quantum: 4.0,
             playing: true,
             peers: 1,
+            peer_list: vec![
+                crate::link::PeerRow {
+                    node: "abcdefgh".into(),
+                    session: "abcdefgh".into(),
+                    in_session: true,
+                    host: Some("192.0.2.21".into()),
+                    hostname: Some("laptop.local".into()),
+                    local: false,
+                    bpm: 120.0,
+                    playing: Some(true),
+                    age_ms: 120,
+                },
+                crate::link::PeerRow {
+                    node: "zyxwvuts".into(),
+                    session: "zyxwvuts".into(),
+                    in_session: false,
+                    host: None,
+                    hostname: None,
+                    local: true,
+                    bpm: 98.0,
+                    playing: None,
+                    age_ms: 0,
+                },
+            ],
         }))
         .unwrap();
         assert_eq!(
             k,
-            json!({"t":"link","ts":5,"beat":2.5,"bpm":120.0,"quantum":4.0,"playing":true,"peers":1})
+            json!({"t":"link","ts":5,"beat":2.5,"bpm":120.0,"quantum":4.0,"playing":true,"peers":1,
+                   "peer_list":[
+                     {"node":"abcdefgh","session":"abcdefgh","in_session":true,"host":"192.0.2.21",
+                      "hostname":"laptop.local","local":false,"bpm":120.0,"playing":true,"age_ms":120},
+                     // Unknowns are absent, not null.
+                     {"node":"zyxwvuts","session":"zyxwvuts","in_session":false,"local":true,
+                      "bpm":98.0,"age_ms":0}]})
         );
         let s: Value = serde_json::from_str(&saved(Ok("/p.toml"))).unwrap();
         assert_eq!(s, json!({"t":"saved","ok":true,"path":"/p.toml"}));

@@ -23,6 +23,7 @@ pub mod link;
 pub mod midi;
 pub mod pad;
 pub mod prng;
+pub mod rdns;
 pub mod router;
 pub mod sync;
 pub mod timing;

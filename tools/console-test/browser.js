@@ -2,7 +2,8 @@
 // Drives the real page in headless Chrome (?mock=1) over the DevTools protocol:
 // no uncaught errors, the UI builds from the mock hub, the signal delay (sync
 // point 1) moves the markers onto the kicks, the round trip (sync point 2) and
-// the follow switch round-trip, watch/rule/save round-trip. Node stdlib only (needs
+// the follow switch round-trip, watch/rule/save round-trip, the Link peer
+// dropdown (open, outside click, Escape, empty state). Node stdlib only (needs
 // Node >= 22 for the global WebSocket). Skips (exit 0) when Chrome is absent.
 //   node tools/console-test/browser.js            # screenshot -> <repo>/.screenshots/progress/<date>-console-test/
 //   SCREENSHOT_DIR=… node browser.js              # a lane labels its own directory
@@ -62,7 +63,39 @@ let ch = null;
     ok(await ev("[...document.querySelectorAll('#addrs tbody tr')].every(r => { const m = parseFloat(r.children[3].textContent), x = parseFloat(r.children[4].textContent); return !isNaN(m) && !isNaN(x) && m <= x; })"), 'every remap row shows min ≤ max');
   }
   ok(await ev("document.querySelector('#tl').clientHeight") === 16 + 200 + 34 + 2 * 40, 'canvas has two OSC lanes for ?watch=');
-  ok(/Link 1 peer\b/.test(await ev("document.querySelector('#linkst').textContent")), 'Link group shows peers');
+  ok(/Link 2 peers\b/.test(await ev("document.querySelector('#linkst').textContent")), 'Link group shows peers');
+  // ---- the peer dropdown: click the count; outside click and Escape close it --
+  const dropOpen = () => ev("document.querySelector('#peerdrop').classList.contains('open') && document.querySelector('#peerdrop').offsetParent !== null");
+  const peerRowsText = () => ev("[...document.querySelectorAll('#peerdrop tbody tr')].map(r => [...r.children].map(c => c.textContent).join('|'))");
+  ok(!(await dropOpen()), 'peer list closed at first');
+  await ev("document.querySelector('#linkst').click()");
+  await sleep(400);
+  ok(await dropOpen() && await ev("document.querySelector('#linkst').getAttribute('aria-expanded')") === 'true', 'clicking the count opens the peer list');
+  const pr = await peerRowsText();
+  ok(pr.length === 3, 'three peers listed', pr);
+  ok(/^dj-laptop\.local\|192\.0\.2\.21\|in session\|120\.0 bpm ▶\|/.test(pr[0] || ''), 'a remote peer: hostname, address, in session, tempo', pr[0]);
+  ok(/^this machine\|192\.0\.2\.10\|in session/.test(pr[1] || ''), 'a peer on this machine', pr[1]);
+  ok(/^192\.0\.2\.33\|\|other session\|98\.0 bpm ■/.test(pr[2] || ''), 'a peer in another session', pr[2]);
+  ok(/2 in the hub's session, 1 in another/.test(await ev("document.querySelector('#peerdrop').textContent")), 'summary line');
+  { // anchored under the count, inside the viewport
+    const r = await ev("(() => { const a = document.querySelector('#linkst').getBoundingClientRect(), d = document.querySelector('#peerdrop').getBoundingClientRect(); return { top: d.top - a.bottom, left: d.left - a.left, right: d.right }; })()");
+    ok(r.top >= 0 && r.top < 12 && Math.abs(r.left) < 2 && r.right <= 1600, 'dropdown anchored under the count', r);
+  }
+  await sleep(600);
+  ok((await peerRowsText()).length === 3, 'the open list keeps updating');
+  fs.mkdirSync(shotDir, { recursive: true });
+  const shotP = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: 300, scale: 1 } });
+  fs.writeFileSync(path.join(shotDir, 'console-link-peers-open.png'), Buffer.from(shotP.result.data, 'base64'));
+  await ev("document.querySelector('#peerdrop').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))");
+  ok(await dropOpen(), 'a click inside the list keeps it open');
+  await ev("document.querySelector('#tl').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))");
+  ok(!(await dropOpen()), 'an outside click closes it');
+  await ev("document.querySelector('#linkst').click()");
+  ok(await dropOpen(), 'reopens');
+  await ev("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  ok(!(await dropOpen()) && await ev("document.querySelector('#linkst').getAttribute('aria-expanded')") === 'false', 'Escape closes it');
+  await ev("document.querySelector('#linkst').click(); document.querySelector('#linkst').click()");
+  ok(!(await dropOpen()), 'clicking the count again closes it');
   ok(await ev("document.querySelector('#bpm').value") === '120' && /stop/.test(await ev("document.querySelector('#play').textContent")), 'tempo 120 and ■ stop while playing');
   const align0 = await ev("document.querySelector('#align').textContent");
   const med = (t) => { const m = t.match(/median of \d+: ([+-][\d.]+) ms/); return m ? Number(m[1]) : null; };
@@ -200,9 +233,19 @@ let ch = null;
   await sleep(400);
   ok(await ev("!document.body.classList.contains('tab-osc') && document.querySelector('#oscpage').offsetParent === null"), 'sync tab comes back');
 
+  // ---- no peers: the empty state ----------------------------------------------
+  await cdp('Page.navigate', { url: page + '&peers=0' });
+  await sleep(1500);
+  ok(/Link 0 peers\b/.test(await ev("document.querySelector('#linkst').textContent")), 'no peers: the count says 0');
+  await ev("document.querySelector('#linkst').click()");
+  await sleep(300);
+  ok(await ev("document.querySelector('#peerdrop .empty') && document.querySelector('#peerdrop').textContent") === 'no Link peers', 'empty state: no Link peers');
+  const shotE = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: 300, scale: 1 } });
+  fs.writeFileSync(path.join(shotDir, 'console-link-peers-empty.png'), Buffer.from(shotE.result.data, 'base64'));
+
   ok(errors.length === 0, 'no uncaught errors / console errors', errors);
 
-  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png');
+  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-peers-empty.png');
   console.log((fail ? 'FAILED' : 'ok') + ': ' + pass + ' passed, ' + fail + ' failed');
   clearTimeout(killer); ws.close(); ch.kill('SIGKILL');
   process.exit(fail ? 1 : 0);
