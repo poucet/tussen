@@ -180,8 +180,7 @@ pub fn spawn_with_takes(
             let mut l = Loop::new(&config, router, extras, takes);
             l.hub_port = addr.port();
             l.resolved = resolved;
-            let replay = l.replay.take().unwrap_or_else(crossbeam_channel::never);
-            l.run(&out, net_rx, generated, replay, &malformed, &stop, quiet)
+            l.run(&out, net_rx, generated, &malformed, &stop, quiet)
         }
     })?;
     Ok(Hub { addr, stop, thread: Some(thread) })
@@ -424,7 +423,6 @@ impl Loop {
         out: &UdpSocket,
         mut net: Receiver<Inbound>,
         mut generated: Receiver<Message>,
-        mut replay: Receiver<Message>,
         malformed: &AtomicU64,
         stop: &AtomicBool,
         quiet: bool,
@@ -434,6 +432,7 @@ impl Loop {
             None => crossbeam_channel::never(),
         };
         let mut resolved = std::mem::replace(&mut self.resolved, crossbeam_channel::never());
+        let mut replay = self.replay.take().unwrap_or_else(crossbeam_channel::never);
         let mut last_report = Instant::now();
 
         while !stop.load(Ordering::Relaxed) {
