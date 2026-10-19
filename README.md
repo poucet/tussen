@@ -56,6 +56,9 @@ for output taps) is macOS-only; routing, MIDI, Link and the console are
 portable Rust, untested elsewhere. First audio run: macOS asks to let your
 terminal record system audio — allow it.
 
+A whole room — music laptops on Link, a mixer into the hub, a visuals
+laptop, performance devices — is [docs/guides/setup.md](docs/guides/setup.md).
+
 ## How signals flow
 
 ```
