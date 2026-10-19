@@ -14,6 +14,14 @@
 //! configured tempo at every merge, and a DJ joining Link had their
 //! playing track slowed to the hub's 120).
 //!
+//! **Meeting other sessions** is Link's own rule, so the hub and every
+//! other Link app pick the same winner: the older session. A DJ who had
+//! Link on first keeps their session and tempo, and the hub joins it; a DJ
+//! who switches Link on after the hub founded joins the hub's session at
+//! its tempo — what any Link app does when it joins one already running.
+//! Either way the hub follows every tempo change from then on. The log
+//! says which session the hub is in and every tempo it follows.
+//!
 //! **Signals** (MIDI class, like `/tussen/midi/…`): `bpm`, `beat` (the
 //! session's beat), `phase` (`frac(beat)`) and `running` (0/1), all `f`,
 //! at 60 Hz; `onbeat` (`i`, the beat index) when a whole beat passes,
@@ -25,7 +33,7 @@
 //! beat 0, so it holds a millisecond's precision for over 9 hours at
 //! 120 BPM.
 //!
-//! The pure parts — [`sample`], [`Beats`], [`Leader`] — take a
+//! The pure parts — [`sample`], [`Beats`], [`next_wake`] — take a
 //! [`SessionState`] and a host time, so the tests drive them from a fake
 //! Link timeline with no sockets.
 
@@ -244,6 +252,7 @@ fn run_link(link: &Link, config: &LinkConfig, cmds: &Receiver<LinkCmd>, tap: Opt
     let mut next_tick = clock.now();
     let mut last_console = Instant::now() - CONSOLE_PERIOD;
     let mut last_status: Option<(String, usize)> = None;
+    let mut logged_bpm = (0.0, Instant::now());
     loop {
         let mut changed = false;
         // The only place the hub proposes anything: a human's console
@@ -253,10 +262,21 @@ fn run_link(link: &Link, config: &LinkConfig, cmds: &Receiver<LinkCmd>, tap: Opt
             changed = true;
         }
         let state = link.state();
-        let status = (format!("{:?}", state.status), state.peers);
+        let session = state.session.map_or_else(|| "-".into(), |s| s.to_string());
+        let status = (format!("{:?} in session {session}", state.status), state.peers);
         if last_status.as_ref() != Some(&status) {
             log::info!("link: {} at {:.2} BPM, {} peer(s)", status.0, state.tempo(), status.1);
             last_status = Some(status);
+            logged_bpm = (state.tempo(), Instant::now());
+        }
+        // A tempo the hub follows, at most twice a second while a DJ rides
+        // the fader.
+        if state.joined()
+            && (state.tempo() - logged_bpm.0).abs() >= 0.01
+            && logged_bpm.1.elapsed() >= Duration::from_millis(500)
+        {
+            log::info!("link: following {:.2} BPM", state.tempo());
+            logged_bpm = (state.tempo(), Instant::now());
         }
 
         let now = clock.now();
