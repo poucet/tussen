@@ -20,7 +20,11 @@ An OSC/MIDI/audio hub for live performance. One Rust process that:
   streamed as RTP L16 to whoever asked for it;
 - **aligns it all**: two sync delays hold OSC/MIDI back so control signals,
   the beat and the returning music arrive together — set live, by ear or by
-  eye, on the built-in console.
+  eye, on the built-in console;
+- **records and replays** — `run --record` keeps every signal, the audio
+  and the Link timeline as a take; `run --replay latest --loop 9..17` plays
+  it back as if live, leading Link, so the visuals can be built without the
+  band.
 
 Built to drive visual rigs (shaders, TouchDesigner, browser pages) from the
 same signals the musicians play; bring any OSC consumer.
@@ -135,6 +139,22 @@ and the osc-traffic tab: a live scrolling feed of every message. **Save**
 writes the sync and remap state back into the config in use, comments
 intact — into your user config if the hub was running the shipped example (it
 copies the example there first, then uses that file).
+
+## Record and replay
+
+```sh
+./simply-tussen run --record rehearsal            # until Ctrl-C
+./simply-tussen takes                             # name, length, size
+./simply-tussen run --replay latest --loop 9..17  # loop bars 9–17, as if live
+```
+
+A take (in `~/.local/share/tussen/takes/`) holds every signal the hub
+routed, the audio it streamed, the Link timeline and the sync state. On
+replay, consumers see the same addresses, RTP stream and clock as live;
+the take leads the Link session (`--replay-link off` leaves it alone);
+loops are whole bars and restore state at every seam. How-to:
+[docs/guides/setup.md § Record and replay](docs/guides/setup.md#record-and-replay);
+design: [docs/design/replay.md](docs/design/replay.md).
 
 ## Reading the signals from your own code
 

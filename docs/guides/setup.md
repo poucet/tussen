@@ -240,6 +240,50 @@ address jumps to the top of the address list), click it, pick the dest,
 type the address its binding expects, optionally a range (`lo`..`hi`), and
 tick *keep* to send the original too. `*` matches one path segment. Save.
 
+## Record and replay
+
+Record a rehearsal once, then work on the visuals against it without the
+band: the hub plays the take back as if it were live. Every consumer gets
+the same addresses, the same RTP stream and the same `/tussen/clock/…`, and
+Link apps (TouchDesigner's Link CHOP, Ableton) follow the replay's beat.
+
+```sh
+./simply-tussen run --record rehearsal          # record until Ctrl-C
+./simply-tussen takes                           # what's recorded
+./simply-tussen run --replay latest             # loop the whole take
+./simply-tussen run --replay latest --loop 9..17   # loop bars 9 to 17
+```
+
+- **What a take holds**: every signal the hub routed (OSC, MIDI, pad,
+  each with its arrival time and source), the audio it streamed, the Link
+  timeline (tempo, beat, start/stop) and the sync state. NDI never passes
+  the hub, so it is not in a take. Takes live in
+  `~/.local/share/tussen/takes/` (`$XDG_DATA_HOME/tussen/takes/`;
+  `--takes-dir` picks another). A take stays valid if the hub is killed:
+  it holds everything up to its last flush (a quarter of a second).
+- **Replaying replaces the hub's own sources**: its MIDI, pad, audio
+  capture and Link are off; the take's play instead. OSC from the network
+  still merges, so a device you test with works as usual. Recorded hellos
+  are never replayed: no phantom devices.
+- **Loops are whole bars** of the recorded Link timeline: `--loop 9..17`
+  plays from bar 9's first beat to bar 17's, and `--from 13` starts at bar
+  13. At each seam the hub sends the last value of every address as it was
+  at the loop start (held notes, knobs), never re-fires events (`…/press`,
+  `onbeat`), and keeps the beat counting up in the same bar phase. The whole
+  take loops onto the next bar line, with less than a bar of silence.
+- **Link**: with nobody else in a session the replay founds one at the
+  take's tempo; otherwise it joins, proposes the take's tempo, and lines
+  the take up with that session's bars. Tempo changes in the take are
+  proposed as they come. `--replay-link off` leaves Link alone (then read
+  the beat from `/tussen/clock/…`).
+- **The audio plays the take's signal delay early**, as if the rig had a
+  mixer with no latency, so the music lands on the beat it was played on
+  and the console's alignment strip reads 0. If the venue folded the
+  visuals' own audio path into the signal delay, the audio comes 30–50 ms
+  early: `--audio-lead-ms <n>` sets the lead for one run.
+- The console's top bar says `REPLAY <take> · bar x/y · loop a–b`, and its
+  OSC feed marks replayed signals `src: "replay"`.
+
 ## If something's off
 
 - **Hub won't start, port 9000 busy:** another hub is running —

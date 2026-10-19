@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+#### Record a rehearsal, replay it as if live · 2026-10-20 00:59 · zxuvnzuw
+
+- **`simply-tussen run --record [NAME]`** writes a take into
+  `~/.local/share/tussen/takes/<UTC time>[-name]/` (`$XDG_DATA_HOME`,
+  `--takes-dir`): every signal the hub routed (OSC, MIDI, pad, with time and
+  source), the audio it streamed as a WAV, the Link timeline and the sync
+  state, plus a copy of the config. Valid after every flush, so a killed hub
+  loses at most a quarter of a second. The start banner shows the path.
+- **`simply-tussen run --replay <take|latest>`** plays it back through the
+  router, looping: same addresses, same RTP stream (one SSRC, continuous
+  sequence), same `/tussen/clock/…`. Consumers change nothing; the console
+  marks replayed signals `src: "replay"`. The hub's own MIDI, pad, capture
+  and Link are off while replaying; network OSC still merges; recorded
+  hellos are never replayed.
+- **The replay leads Ableton Link**: it founds a session at the take's
+  tempo if there is none, else proposes the take's tempo and starts on that
+  session's bar grid; recorded tempo changes follow. TouchDesigner's Link
+  CHOP and Ableton follow a replay. `--replay-link off` leaves Link alone.
+- **Bar loops**: `--loop 9..17` loops bars 9–17 of the recorded timeline,
+  `--from 13` starts at bar 13. Each seam restores the last value of every
+  address, lets go of notes not held at the loop start, never re-fires
+  events, and keeps the beat counting up in phase.
+- Audio plays the take's final signal delay ahead of the signals (no mixer
+  in a replay); `--audio-lead-ms` overrides it.
+- `simply-tussen takes` lists takes; the console's top bar shows
+  `REPLAY <take> · bar x/y · loop a–b`; the `link` frame gains `replay`.
+
 #### The binary is `simply-tussen` · 2026-10-20 00:29 · rpklqlnu
 
 - **Renamed: `tussen-hub` → `simply-tussen`** — the command, the installed
