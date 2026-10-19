@@ -61,6 +61,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
 #hist td.v,#seen td.v{text-align:right;font-variant-numeric:tabular-nums}
 #histpause.on{color:var(--acc)}
 #linkgrp{position:relative}
+#replayst{background:#8b2626;color:#fff;padding:1px 7px;border-radius:9px;font-variant-numeric:tabular-nums}
 #linkst{cursor:pointer;border-bottom:1px dotted var(--dim)}#linkst:hover{color:#fff}
 #peerdrop{display:none;position:absolute;top:calc(100% + 5px);left:0;z-index:5;min-width:520px;background:var(--pn);border:1px solid var(--ln);box-shadow:0 6px 18px #000a;padding:6px 8px}
 #peerdrop.open{display:block}#peerdrop .mode{max-width:560px;white-space:normal;margin-bottom:4px}
@@ -76,6 +77,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
   <button id="pause" title="Space">⏸ pause</button>
   <span>window <input id="win" type="number" min="50" max="10000" step="10" value="2000"> ms</span>
   <span>gain <input id="gain" type="number" min="0.25" max="64" step="0.25" value="1"></span>
+  <span id="replayst" hidden title="the hub is replaying a take (simply-tussen run --replay): every signal and the audio come from it"></span>
   <span id="linkgrp" title="Ableton Link: the hub joins the session it hears, or waits with a beat of its own; the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="who is in the Link session — click for the list">no Link</span><div id="peerdrop" role="dialog" aria-label="Link peers"></div> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button> <button id="linkstart" hidden title="found a Link session now, at this tempo — for when nobody else will join">⊕ start session</button></span>
   <span id="readout" class="dim">—</span>
   <span id="endpoint" title="where OSC senders (djay Pro, tablets, scripts) send — any address under its own prefix, UDP">OSC in <code id="eptext">…</code><button id="epcopy" title="copy ip:port">⧉ copy</button></span>
@@ -271,6 +273,7 @@ function createState() {
     freshConnection: true, helloCount: 0,
     links: [], linkAtMs: -Infinity,    // recent `link` messages (ts ascending); local ms of the last
     linkPeers: [],                     // the latest `link` message's peer_list (normPeers)
+    replay: null,                      // the latest `link` message's replay {take, bar, bars, loop}, if replaying
     oscEndpoint: null,                 // hello's osc {port, ips, hostname}: where senders aim
     addrSeen: new Map(),               // addr -> latest addrs entry; accumulates, never deletes
     history: { buf: [], total: 0 },    // live messages, ts ascending, ring of HISTORY_CAP
@@ -351,6 +354,12 @@ function linkLabel(l) {
   if (l.mode === 'waiting') return 'Link: waiting';
   return 'Link ' + l.peers + ' peer' + (l.peers === 1 ? '' : 's');
 }
+// The top bar while replaying: `REPLAY <take> · bar 10.3/24 · loop 9–17`.
+function replayLabel(r) {
+  if (!r) return '';
+  const bar = Number(r.bar) || 0, loop = Array.isArray(r.loop) && r.loop.length === 2 ? ' · loop ' + r.loop[0] + '–' + r.loop[1] : '';
+  return 'REPLAY ' + String(r.take || '') + ' · bar ' + bar.toFixed(1) + '/' + (Number(r.bars) || 0) + loop;
+}
 // The dropdown's first line: where the hub is with Link and what happens next.
 function linkModeNote(l) {
   if (!l) return 'no Link';
@@ -424,6 +433,7 @@ function applyMessage(s, m, localMs) {
       if (s.links.length > LINK_KEEP) s.links.splice(0, s.links.length - LINK_KEEP);
       s.linkAtMs = localMs;
       s.linkPeers = normPeers(m.peer_list);
+      s.replay = m.replay && typeof m.replay === 'object' ? m.replay : null;
       return 'link';
     }
     case 'saved':
@@ -751,7 +761,7 @@ function round4(x) { return Math.round(x * 1e4) / 1e4; }
 
 const api = {
   BLOCK_FRAMES, MAX_DELAY_MS, FOLLOWS, KEEP_US, MIN_WINDOW_US, MAX_WINDOW_US,
-  TEMPO_MIN, TEMPO_MAX, LINK_KEEP, LINK_STALE_MS, LINK_MODES, clampTempo, beatGrid, linkLive, normPeers, peerRows, peerSummary, linkLabel, linkModeNote,
+  TEMPO_MIN, TEMPO_MAX, LINK_KEEP, LINK_STALE_MS, LINK_MODES, clampTempo, beatGrid, linkLive, normPeers, peerRows, peerSummary, linkLabel, linkModeNote, replayLabel,
   signalClass, clampDelay, signalDelayMs, audioDelayMs, shiftTs,
   timeToX, xToTime, zoomView, gridStepMs, blockDurUs,
   AudioRing, midiKind, createState, resetBuffers, applyMessage, sortedAddrs, isHot, HEAT_MS, matchPattern,
@@ -809,6 +819,9 @@ function latestLink() { return S.links.length ? S.links[S.links.length - 1] : nu
 function renderLink() {
   const live = L.linkLive(S, performance.now()), l = latestLink(), n = $('#bpm'), p = $('#play');
   $('#linkst').textContent = L.linkLabel(live ? l : null) + ' ▾';
+  const r = live ? S.replay : null;
+  $('#replayst').hidden = !r;
+  $('#replayst').textContent = L.replayLabel(r);
   $('#linkst').className = live && l.mode !== 'waiting' ? '' : 'dim';
   $('#linkstart').hidden = !(live && l.mode === 'waiting');
   renderPeers(live);

@@ -378,6 +378,7 @@ section('Link');
 }
 { // modes: waiting → Start session; waiting → a peer joins
   ok(run.msgs.filter(m => m.t === 'link').every(m => m.mode === 'joined'), 'mock with peers: joined');
+  ok(L.replayLabel({ take: 'T-rehearsal', bar: 10.34, bars: 24, loop: [9, 17] }) === 'REPLAY T-rehearsal · bar 10.3/24 · loop 9–17' && L.replayLabel({ take: 't', bar: 1, bars: 3 }) === 'REPLAY t · bar 1.0/3' && L.replayLabel(null) === '', 'replayLabel');
   ok(L.linkLabel({ mode: 'joined', peers: 2 }) === 'Link 2 peers' && L.linkLabel({ mode: 'started', peers: 1 }) === 'Link 1 peer' && L.linkLabel({ mode: 'waiting', peers: 0 }) === 'Link: waiting' && L.linkLabel(null) === 'no Link', 'linkLabel');
   ok(/joins the first one it hears/.test(L.linkModeNote({ mode: 'waiting' })) && /stays until the hub stops/.test(L.linkModeNote({ mode: 'started' })) && /waits again/.test(L.linkModeNote({ mode: 'joined' })), 'linkModeNote says the rule');
   const S9 = L.createState();

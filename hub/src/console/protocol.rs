@@ -355,4 +355,21 @@ mod tests {
         assert!(parse_request("not json").is_err());
         assert!(parse_request(r#"{"t":"set_sync","signal_delay_ms":"x"}"#).is_err());
     }
+
+    #[test]
+    fn a_replaying_hub_says_so_in_the_link_frame() {
+        let status = crate::link::LinkStatus {
+            ts: 1,
+            beat: 0.0,
+            bpm: 120.0,
+            quantum: 4.0,
+            playing: true,
+            mode: crate::link::Mode::Started,
+            peers: 0,
+            peer_list: vec![],
+            replay: Some(crate::replay::Status { take: "t".into(), bar: 9.5, bars: 24, loop_bars: Some((9, 17)) }),
+        };
+        let v: Value = serde_json::from_str(&link(&status)).unwrap();
+        assert_eq!(v["replay"], json!({"take":"t","bar":9.5,"bars":24,"loop":[9,17]}));
+    }
 }
