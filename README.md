@@ -32,11 +32,11 @@ cd hub && cargo build --release
 ./target/release/tussen-hub run            # reads hub.toml at the repo root
 ```
 
-Or, from the repo root, `tools/tussen` does both, then prints the console
+Or, from the repo root, `./tussen` does both, then prints the console
 URL and the OSC endpoint and opens the console.
 
 No hardware needed to try it: `tussen-hub run --fake-midi --fake-pad` (or
-`tools/tussen --fake-midi --fake-pad`) invents a controller and a gamepad. The hub prints one stats line a second:
+`./tussen --fake-midi --fake-pad`) invents a controller and a gamepad. The hub prints one stats line a second:
 
 ```
 devices=1 in=420/s out=1130/s audio=187.5pkt/s audio_ovf=0 console_drop=0 malformed=0 send_errors=0

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/tussen [args…] — build the hub, start it with the repo's hub.toml, print the
+# ./tussen [args…] — build the hub, start it with the repo's hub.toml, print the
 # console URL and the OSC endpoint, open the console; Ctrl-C stops it.
 #
 # Args pass through to `tussen-hub run`: --fake-midi, --fake-pad (no hardware needed),
@@ -7,7 +7,7 @@
 # Other hub commands: hub/target/release/tussen-hub --help.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 HUB="$ROOT/hub/target/release/tussen-hub"
 
 die() { echo "tussen: $*" >&2; exit 1; }

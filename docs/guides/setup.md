@@ -58,10 +58,10 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    The `djay` destination is OSC *into* djay Pro; point it at the DJ laptop
    or delete it. Use real names; a typo shows up as a resolve warning in
    the log.
-3. **Run it:** `tools/tussen` from the repo root. It builds the hub,
+3. **Run it:** `./tussen` from the repo root. It builds the hub,
    starts it, prints the console URL and the OSC endpoint to hand to the
    music laptops, and opens the console (its top bar has a copy button for
-   the endpoint). Ctrl-C stops it. `tools/tussen --fake-midi` stands in
+   the endpoint). Ctrl-C stops it. `./tussen --fake-midi` stands in
    for a MIDI controller; `--audio-device "<name>"` overrides `[audio]` for
    one run.
 4. **First run on macOS:** allow incoming connections, and let the terminal
