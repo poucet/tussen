@@ -1,0 +1,1190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>tussen hub console</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#0b0d10;--pn:#12161b;--ln:#232a33;--fg:#c9d1d9;--dim:#6e7781;--acc:#f5a623;--ok:#3fb950;--bad:#f85149;--osc:#58a6ff;--midi:#f5a623}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace}
+button,input,select{font:inherit;color:var(--fg);background:#1b2129;border:1px solid var(--ln);border-radius:2px;padding:1px 5px}
+button{cursor:pointer}button:hover{border-color:#456}button:disabled,input:disabled{opacity:.35;cursor:default}
+input[type=number]{width:52px;text-align:right}
+input[type=range]{width:110px;padding:0;vertical-align:middle;accent-color:var(--acc)}
+#bar{display:flex;gap:10px;align-items:center;padding:4px 8px;background:var(--pn);border-bottom:1px solid var(--ln);position:sticky;top:0;z-index:2;flex-wrap:wrap}
+#bar b{color:#fff}
+.pill{padding:1px 7px;border-radius:9px;background:#333;color:#fff}
+.pill.ok{background:#1f6f34}.pill.bad{background:#8b2626}.pill.mock{background:#6b4fbb}
+#unsaved{color:var(--acc)}#unsaved.clean{color:var(--dim)}
+#savedmsg.err{color:var(--bad)}#savedmsg.ok{color:var(--ok)}
+#readout{color:#fff;min-width:300px}
+#savedmsg{max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dim{color:var(--dim)}
+#tlwrap{position:relative;border-bottom:1px solid var(--ln)}
+#tl{display:block;width:100%;cursor:crosshair}
+#awrap{margin-top:2px;border:1px solid var(--ln)}
+#aw{display:block;width:100%;cursor:grab}
+#aw.dragging{cursor:grabbing}
+#main{display:grid;grid-template-columns:minmax(560px,1fr) minmax(480px,1fr);gap:0}
+.pane{padding:6px 8px;border-right:1px solid var(--ln);min-width:0}
+h3{margin:2px 0 4px;font-size:12px;color:#fff;font-weight:600}
+table{border-collapse:collapse;width:100%}
+td,th{padding:2px 4px;border-bottom:1px solid #1a1f26;text-align:left;white-space:nowrap}
+th{color:var(--dim);font-weight:normal}
+tr.sel td{background:#1d2633}
+tr.engine td{color:var(--dim)}
+.dl{display:inline-flex;gap:2px;align-items:center}
+.dl button{padding:0 3px;min-width:22px}
+.sp{margin:2px 0 6px}
+#addrs{max-height:max(330px,calc(100vh - 430px));overflow:auto;border:1px solid var(--ln)}
+#addrs tr{cursor:pointer}#addrs tr:hover td{background:#18202a}
+#addrs tr.hot td{background:#3a2a0a;color:#fff}
+#addrs tr.w td:first-child{color:var(--osc)}
+.cls-midi{color:var(--midi)}.cls-osc{color:var(--osc)}
+.addr{max-width:380px;overflow:hidden;text-overflow:ellipsis}
+#rform{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:6px 0}
+#rform input[type=text]{width:220px}#rform input.n{width:52px}
+#rerr{color:var(--bad)}
+.note{color:var(--dim);font-size:11px}
+kbd{border:1px solid var(--ln);padding:0 3px;border-radius:2px}
+#endpoint{display:inline-flex;gap:4px;align-items:center}
+#endpoint code{background:#1b2129;border:1px solid var(--ln);border-radius:2px;padding:1px 5px;color:#fff;user-select:all}
+#tabs{display:flex;gap:0;background:var(--pn);border-bottom:1px solid var(--ln)}
+#tabs button{border:0;border-right:1px solid var(--ln);border-radius:0;background:none;padding:4px 14px;color:var(--dim)}
+#tabs button.on{color:#fff;background:var(--bg);box-shadow:inset 0 2px 0 var(--acc)}
+body.tab-osc #tlwrap,body.tab-osc #main{display:none}
+#oscpage{display:none}
+body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minmax(420px,2fr);gap:0}
+#hist{max-height:calc(100vh - 130px);overflow:auto;border:1px solid var(--ln)}
+#seen{max-height:calc(100vh - 130px);overflow:auto;border:1px solid var(--ln)}
+#hist td.v,#seen td.v{text-align:right;font-variant-numeric:tabular-nums}
+#histpause.on{color:var(--acc)}
+</style>
+</head>
+<body>
+<div id="bar">
+  <b>tussen console</b>
+  <span id="conn" class="pill">…</span>
+  <button id="pause" title="Space">⏸ pause</button>
+  <span>window <input id="win" type="number" min="50" max="10000" step="10" value="2000"> ms</span>
+  <span>gain <input id="gain" type="number" min="0.25" max="64" step="0.25" value="1"></span>
+  <span id="linkgrp" title="Ableton Link session (the hub leads it); the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim">no Link</span> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button></span>
+  <span id="readout" class="dim">—</span>
+  <span id="endpoint" title="where OSC senders (djay Pro, tablets, scripts) send — any address under its own prefix, UDP">OSC in <code id="eptext">…</code><button id="epcopy" title="copy ip:port">⧉ copy</button></span>
+  <span style="flex:1"></span>
+  <span id="unsaved" class="clean">saved state</span>
+  <button id="save">💾 Save</button>
+  <span id="savedmsg"></span>
+</div>
+<div id="tabs"><button id="tab-sync" class="on">sync + remap</button><button id="tab-osc">osc traffic</button></div>
+<div id="tlwrap"><canvas id="tl"></canvas></div>
+<div id="main">
+  <div class="pane">
+    <h3>Sync — two sync points <span class="note">signals = MIDI + OSC (everything but audio); the engine and the monitor are never delayed</span></h3>
+    <div class="sp">signal delay (sync point 1) <span id="sigctl"></span>
+      <div class="note">signals wait for the audio to come back from the engine: lines MIDI/OSC up with the returning sound (what the timeline shows).</div></div>
+    <div class="sp">TD round trip (sync point 2) <span id="rtctl"></span>
+      <div class="note">devices “in time with TD” wait this much longer, signals and audio, so they match TD's NDI picture.</div></div>
+    <div class="sp">anchored at the beat <span class="note">the purple line holds still; drag the waveform (or slide the delay) until the kicks sit on it</span>
+      <div id="awrap"><canvas id="aw"></canvas></div></div>
+    <table id="dests"><thead><tr><th>dest</th><th>kind</th><th>follow</th><th>signals ms</th><th>audio ms</th></tr></thead><tbody></tbody></table>
+    <div id="align" class="note" style="margin-top:6px"></div>
+    <p class="note">Click a MIDI marker to select it; the cursor readout shows cursor − marker. <kbd>Space</kbd> pause · wheel zoom · drag pans (paused) · <kbd>←</kbd><kbd>→</kbd> signal delay ±1 (<kbd>⇧</kbd> ±10).</p>
+  </div>
+  <div class="pane">
+    <h3>Remap — addresses seen <span class="note">by address; wiggle a control and it lights up on top; click = watch + fill rule</span></h3>
+    <input id="filter" type="text" placeholder="filter…" style="width:260px"> <span id="acount" class="dim"></span>
+    <div id="addrs"><table><thead><tr><th>address</th><th>class</th><th>rate/s</th><th>min</th><th>max</th><th>age s</th></tr></thead><tbody></tbody></table></div>
+    <div id="rform">
+      <select id="rdest"></select>
+      <input id="rfrom" type="text" placeholder="from (/a/*/c)">
+      →
+      <input id="rto" type="text" placeholder="to">
+      range <input id="rlo" class="n" type="text" placeholder="lo"><input id="rhi" class="n" type="text" placeholder="hi">
+      <label><input id="rkeep" type="checkbox"> keep</label>
+      <button id="rsubmit">add rule</button><button id="rclear">clear</button>
+      <span id="rerr"></span>
+    </div>
+    <table id="rules"><thead><tr><th>dest</th><th>from</th><th>to</th><th>range</th><th>keep</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+<div id="oscpage">
+  <div class="pane">
+    <h3>Live messages <span class="note">every OSC + MIDI signal while this tab is open, newest first</span></h3>
+    <div class="sp">
+      <button id="histpause">⏸ pause</button>
+      <input id="histfilter" type="text" placeholder="filter addresses…" style="width:240px">
+      <span id="histcount" class="dim"></span>
+    </div>
+    <div id="hist"><table><thead><tr><th>time s</th><th>address</th><th>value</th><th>source</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="pane">
+    <h3>All OSC addresses <span class="note">since hub start, never forgets; in = arrived on :9000, out = hub-made (clock, MIDI, remap outputs)</span></h3>
+    <div class="sp">
+      <input id="seenfilter" type="text" placeholder="filter…" style="width:240px">
+      <span id="seencount" class="dim"></span>
+    </div>
+    <div id="seen"><table><thead><tr><th>address</th><th>dir</th><th>class</th><th>count</th><th>min</th><th>last value</th><th>max</th><th>age s</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<script id="logic">
+// Pure protocol/state/mock/geometry logic. No DOM. tools/console-test loads
+// this block headless (it exports via `module` when one is present).
+(function (root) {
+'use strict';
+const BLOCK_FRAMES = 256;
+const MAX_DELAY_MS = 5000;
+const FOLLOWS = ['td', 'music'];
+const TEMPO_MIN = 20, TEMPO_MAX = 999, LINK_KEEP = 200, LINK_STALE_MS = 2000;
+const KEEP_US = 30e6;
+const HISTORY_CAP = 5000;           // live-history ring (messages kept for the osc tab)
+const HEAT_MS = 1500;               // how long a wiggled address stays highlighted               // history kept for panning while paused
+const MIDI_PREFIXES = ['/tussen/midi/', '/tussen/clock/'];
+
+function signalClass(addr) {
+  for (const p of MIDI_PREFIXES) if (addr.startsWith(p)) return 'midi';
+  return 'osc';
+}
+function clampInt(v, lo, hi) { v = Math.round(Number(v)); if (!isFinite(v)) v = lo; return Math.max(lo, Math.min(hi, v)); }
+function clampDelay(ms) { return clampInt(ms, 0, MAX_DELAY_MS); }
+function clampTempo(bpm) { let v = Number(bpm); if (!isFinite(v)) v = TEMPO_MIN; return Math.round(Math.max(TEMPO_MIN, Math.min(TEMPO_MAX, v)) * 100) / 100; }
+
+// --- Link beat grid -----------------------------------------------------------
+// links: `link` messages, ts ascending. Each one's beat line beat(t) = beat +
+// (t - ts)*bpm/60e6 holds from its ts to the next one's (the earliest also
+// covers everything before it). Returns the integer beats whose hub time lies
+// in [t0Us - shiftUs, t1Us - shiftUs], drawn at ts + shiftUs.
+function beatGrid(links, t0Us, t1Us, shiftUs) {
+  const out = [], sh = shiftUs || 0, a0 = t0Us - sh, b0 = t1Us - sh;
+  let lastN = -Infinity;
+  for (let i = 0; i < links.length; i++) {
+    const l = links[i], bpu = l.bpm / 60e6;
+    const a = Math.max(a0, i === 0 ? -Infinity : l.ts), b = Math.min(b0, i + 1 < links.length ? links[i + 1].ts : Infinity);
+    if (!(bpu > 0) || a > b) continue;
+    const q = l.quantum > 0 ? l.quantum : 4;
+    for (let n = Math.ceil(l.beat + (a - l.ts) * bpu - 1e-9); ; n++) {
+      const ts = l.ts + (n - l.beat) / bpu;
+      if (ts > b || (ts === b && b < b0)) break;    // half-open spans, except the window's end
+      if (n <= lastN) continue;                       // a beat on a span boundary counts once
+      lastN = n;
+      out.push({ ts: ts + sh, beat: n, bar: Math.abs(n / q - Math.round(n / q)) < 1e-6, playing: !!l.playing });
+    }
+  }
+  return out;
+}
+
+// --- delays: the two sync points ----------------------------------------------
+// sync = {signal_delay_ms, td_round_trip_ms}. MIDI and OSC (all signals) get
+// the same delay. The engine makes the audio and the monitor hears it raw:
+// neither is ever delayed. TD: signals +signal delay, audio 0. A device that
+// follows TD: signals +signal+round trip, audio +round trip (matches TD's NDI);
+// one that follows the music gets exactly what TD gets.
+function followsTd(dest) { return !!dest && dest.kind === 'device' && dest.follow !== 'music'; }
+function signalDelayMs(dest, sync) {
+  if (!dest || !sync) return 0;
+  const sig = sync.signal_delay_ms || 0;
+  if (dest.kind === 'td') return sig;
+  if (dest.kind === 'device') return followsTd(dest) ? sig + (sync.td_round_trip_ms || 0) : sig;
+  return 0;
+}
+function audioDelayMs(dest, sync) { return followsTd(dest) && sync ? sync.td_round_trip_ms || 0 : 0; }
+// The timeline draws MIDI/OSC/the Link grid at ts + signal_delay_ms (sync point 1).
+function shiftTs(tsUs, dMs) { return tsUs + dMs * 1000; }
+
+// --- time <-> pixel -----------------------------------------------------------
+// view = {endUs, windowUs}; x = width at endUs, 0 at endUs - windowUs.
+function timeToX(tsUs, view, width) { return width - (view.endUs - tsUs) / view.windowUs * width; }
+function xToTime(x, view, width) { return view.endUs - (width - x) / width * view.windowUs; }
+const MIN_WINDOW_US = 50e3, MAX_WINDOW_US = 10e6;
+function zoomView(view, factor, anchorX, width) {
+  const t = xToTime(anchorX, view, width);
+  const w = Math.max(MIN_WINDOW_US, Math.min(MAX_WINDOW_US, view.windowUs * factor));
+  return { endUs: t + (width - anchorX) / width * w, windowUs: w };
+}
+function gridStepMs(windowUs, width, minPx) {
+  const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+  for (const s of steps) if (s * 1000 / windowUs * width >= (minPx || 60)) return s;
+  return 10000;
+}
+function blockDurUs(sampleRate) { return BLOCK_FRAMES / sampleRate * 1e6; }
+
+// --- audio ring ---------------------------------------------------------------
+function AudioRing(cap) {
+  this.cap = cap; this.count = 0;
+  this.ts = new Float64Array(cap); this.mn = new Float32Array(cap);
+  this.mx = new Float32Array(cap); this.rms = new Float32Array(cap);
+}
+AudioRing.prototype.push = function (ts, mn, mx, rms) {
+  const i = this.count % this.cap;
+  this.ts[i] = ts; this.mn[i] = mn; this.mx[i] = mx; this.rms[i] = rms; this.count++;
+};
+AudioRing.prototype.first = function () { return Math.max(0, this.count - this.cap); };
+AudioRing.prototype.at = function (logical) { return logical % this.cap; };
+// first logical index with ts >= tUs
+AudioRing.prototype.lowerBound = function (tUs) {
+  let lo = this.first(), hi = this.count;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (this.ts[m % this.cap] < tUs) lo = m + 1; else hi = m; }
+  return lo;
+};
+AudioRing.prototype.clear = function () { this.count = 0; };
+
+// --- state --------------------------------------------------------------------
+function midiKind(addr, v) {
+  if (addr.startsWith('/tussen/midi/note/')) return v > 0 ? 'noteon' : 'noteoff';
+  if (addr.startsWith('/tussen/midi/cc/')) return 'cc';
+  if (addr === '/tussen/clock/onbeat') return 'beat';
+  if (addr.startsWith('/tussen/midi/')) return 'ctl';   // bend, pressure, program
+  return 'clock';                                       // bpm/beat/phase/running: not drawn
+}
+function normRange(r) {
+  if (Array.isArray(r) && r.length === 2 && isFinite(r[0]) && isFinite(r[1])) return [Number(r[0]), Number(r[1])];
+  return null;
+}
+function normRemap(r) {
+  return { id: r.id, dest: String(r.dest || ''), from: String(r.from || ''), to: String(r.to || ''), range: normRange(r.range), keep: !!r.keep };
+}
+function normDest(d) {
+  const o = { name: String(d.name), kind: d.kind || 'device' };
+  if (o.kind === 'device') o.follow = d.follow === 'music' ? 'music' : 'td';
+  return o;
+}
+function normSync(y) {
+  y = y || {};
+  return { signal_delay_ms: Number(y.signal_delay_ms) || 0, td_round_trip_ms: Number(y.td_round_trip_ms) || 0 };
+}
+function createState() {
+  return {
+    sampleRate: 48000, dests: [], sync: normSync(), remaps: [],
+    audio: new AudioRing(8192), midi: [], osc: new Map(),
+    addrs: [], addrHeat: new Map(), addrLast: new Map(),
+    watch: [], unsaved: false, saved: null, latestTs: 0,
+    freshConnection: true, helloCount: 0,
+    links: [], linkAtMs: -Infinity,    // recent `link` messages (ts ascending); local ms of the last
+    oscEndpoint: null,                 // hello's osc {port, ips, hostname}: where senders aim
+    addrSeen: new Map(),               // addr -> latest addrs entry; accumulates, never deletes
+    history: { buf: [], total: 0 },    // live messages, ts ascending, ring of HISTORY_CAP
+  };
+}
+// One live message into the history ring (amortized splice).
+function histPush(s, e) {
+  const h = s.history;
+  h.buf.push(e); h.total++;
+  if (h.buf.length > HISTORY_CAP + 512) h.buf.splice(0, h.buf.length - HISTORY_CAP);
+}
+// Newest first, filtered by address substring, at most `limit` rows.
+function historyRows(s, filter, limit) {
+  const f = (filter || '').trim().toLowerCase(), out = [], buf = s.history.buf;
+  for (let i = buf.length - 1; i >= 0 && out.length < limit; i--) {
+    if (!f || buf[i].addr.toLowerCase().includes(f)) out.push(buf[i]);
+  }
+  return out;
+}
+// The address set: every address ever seen (the accumulated addrs union,
+// both directions), sorted by address — it is a set, not a feed.
+function seenRows(s, filter) {
+  const f = (filter || '').trim().toLowerCase(), out = [];
+  for (const a of s.addrSeen.values()) if (!f || a.addr.toLowerCase().includes(f)) out.push(a);
+  out.sort((a, b) => (a.addr < b.addr ? -1 : a.addr > b.addr ? 1 : 0));
+  return out;
+}
+// "ip:port" to hand to an OSC sender; hostname when there is no LAN IP.
+function endpointText(ep) {
+  if (!ep || !ep.port) return null;
+  if (ep.ips && ep.ips.length) return ep.ips[0] + ':' + ep.port;
+  if (ep.hostname) return ep.hostname + ':' + ep.port;
+  return null;
+}
+// Every way to reach the hub, for the tooltip: each IP, then the hostname.
+function endpointLines(ep) {
+  if (!ep || !ep.port) return [];
+  const out = (ep.ips || []).map(ip => ip + ':' + ep.port);
+  if (ep.hostname) out.push(ep.hostname + ':' + ep.port);
+  return out;
+}
+function pushSeries(s, addr, ts, v, src) {
+  let ser = s.osc.get(addr);
+  if (!ser) { ser = { ts: [], v: [], src: src }; s.osc.set(addr, ser); }
+  ser.ts.push(ts); ser.v.push(v); ser.src = src;
+  if (ser.ts.length > 64 && ser.ts[0] < ts - KEEP_US) {
+    let k = 0; while (k < ser.ts.length && ser.ts[k] < ts - KEEP_US) k++;
+    ser.ts.splice(0, k); ser.v.splice(0, k);
+  }
+}
+function resetBuffers(s) { s.audio.clear(); s.midi.length = 0; s.osc.clear(); s.latestTs = 0; s.links.length = 0; s.linkAtMs = -Infinity; }
+function linkLive(s, localMs) { return s.links.length > 0 && localMs - s.linkAtMs < LINK_STALE_MS; }
+
+// Apply one hub->page message. Returns the message type when handled, else null.
+function applyMessage(s, m, localMs) {
+  if (!m || typeof m.t !== 'string') return null;
+  switch (m.t) {
+    case 'hello':
+      if (s.freshConnection) { resetBuffers(s); s.unsaved = false; s.freshConnection = false; }
+      s.helloCount++;
+      if (m.sample_rate) s.sampleRate = Number(m.sample_rate);
+      s.dests = (m.dests || []).map(normDest);
+      s.sync = normSync(m.sync);
+      s.remaps = (m.remaps || []).map(normRemap);
+      s.oscEndpoint = m.osc ? { port: Number(m.osc.port) || 0, ips: (m.osc.ips || []).map(String), hostname: m.osc.hostname ? String(m.osc.hostname) : null } : null;
+      return 'hello';
+    case 'dests':
+      s.dests = (m.dests || []).map(normDest);
+      return 'dests';
+    case 'audio': {
+      const bd = blockDurUs(s.sampleRate), b = m.blocks || [];
+      for (let i = 0; i < b.length; i++) s.audio.push(m.ts + i * bd, b[i][0], b[i][1], b[i][2]);
+      s.latestTs = Math.max(s.latestTs, m.ts + b.length * bd);
+      return 'audio';
+    }
+    case 'midi':
+      histPush(s, { ts: m.ts, addr: m.addr, v: m.v, src: 'midi' });
+      s.midi.push({ ts: m.ts, addr: m.addr, v: m.v, kind: midiKind(m.addr, m.v) });
+      if (s.watch.includes(m.addr)) pushSeries(s, m.addr, m.ts, m.v, 'midi');   // a watched MIDI address gets a lane too
+      if (s.midi.length > 30000) s.midi.splice(0, 10000);
+      s.latestTs = Math.max(s.latestTs, m.ts);
+      return 'midi';
+    case 'osc':
+      histPush(s, { ts: m.ts, addr: m.addr, v: m.v, src: m.src });
+      // MIDI-class lanes are fed from `midi` (every MIDI signal arrives there),
+      // so an `osc` copy of one would draw it twice.
+      if (signalClass(m.addr) !== 'midi') pushSeries(s, m.addr, m.ts, m.v, m.src);
+      s.latestTs = Math.max(s.latestTs, m.ts);
+      return 'osc';
+    case 'addrs': {
+      const list = m.list || [];
+      // Heat = "someone is wiggling this": an address that resumes after
+      // >1 s of silence (or appears after the first list) heats up and stays
+      // hot while it keeps moving. Steady streams never heat.
+      const first = s.addrs.length === 0 && s.addrLast.size === 0;
+      for (const a of list) {
+        const prev = s.addrLast.get(a.addr);
+        const hot = localMs - (s.addrHeat.has(a.addr) ? s.addrHeat.get(a.addr) : -Infinity) < HEAT_MS;
+        if (prev === undefined ? !first : a.last_ts > prev && (a.last_ts - prev > 1e6 || hot)) s.addrHeat.set(a.addr, localMs);
+        s.addrLast.set(a.addr, a.last_ts);
+        s.addrSeen.set(a.addr, a);   // accumulate: an address that drops off the list stays here
+      }
+      s.addrs = list;
+      return 'addrs';
+    }
+    case 'link': {
+      const l = { ts: Number(m.ts), beat: Number(m.beat), bpm: Number(m.bpm), quantum: Number(m.quantum) || 4, playing: !!m.playing, peers: Number(m.peers) || 0 };
+      while (s.links.length && s.links[s.links.length - 1].ts >= l.ts) s.links.pop();   // a re-sent instant supersedes
+      s.links.push(l);
+      if (s.links.length > LINK_KEEP) s.links.splice(0, s.links.length - LINK_KEEP);
+      s.linkAtMs = localMs;
+      return 'link';
+    }
+    case 'saved':
+      s.saved = { ok: !!m.ok, path: m.path, error: m.error, atMs: localMs };
+      if (m.ok) s.unsaved = false;
+      return 'saved';
+  }
+  return null;
+}
+
+// Addresses for the remap list: stable address order, filtered by substring,
+// so the table never shuffles under traffic. Hot (being wiggled) addresses
+// jump to the top — the one deliberate reorder, because the display is
+// capped and a wiggled row must be visible. heat: Map addr -> localMs.
+function isHot(heat, addr, localMs) { return !!heat && heat.has(addr) && localMs - heat.get(addr) < HEAT_MS; }
+function sortedAddrs(list, filter, heat, localMs) {
+  const f = (filter || '').trim().toLowerCase();
+  const out = f ? list.filter(a => a.addr.toLowerCase().includes(f)) : list.slice();
+  const h = (a) => isHot(heat, a.addr, localMs) ? 1 : 0;
+  out.sort((a, b) => h(b) - h(a) || (a.addr < b.addr ? -1 : a.addr > b.addr ? 1 : 0));
+  return out;
+}
+// `*` matches exactly one segment.
+function matchPattern(pattern, addr) {
+  const p = pattern.split('/'), a = addr.split('/');
+  if (p.length !== a.length) return false;
+  for (let i = 0; i < p.length; i++) if (p[i] !== '*' && p[i] !== a[i]) return false;
+  return true;
+}
+
+// --- page -> hub messages (protocol.rs field names, verbatim) ---------------
+const msg = {
+  watch: (addrs) => ({ t: 'watch', addrs: addrs.slice() }),
+  // only the moved field(s), integer ms 0..5000
+  setSync: (y) => {
+    const o = { t: 'set_sync' };
+    if (y && y.signal_delay_ms !== undefined) o.signal_delay_ms = clampDelay(y.signal_delay_ms);
+    if (y && y.td_round_trip_ms !== undefined) o.td_round_trip_ms = clampDelay(y.td_round_trip_ms);
+    return o;
+  },
+  setFollow: (dest, follow) => ({ t: 'set_follow', dest: dest, follow: follow === 'music' ? 'music' : 'td' }),
+  remapUpsert: (r) => {
+    const o = { t: 'remap_upsert' };
+    if (r.id !== undefined && r.id !== null && !isTempId(r.id)) o.id = r.id;
+    o.dest = r.dest; o.from = r.from; o.to = r.to;
+    const rg = normRange(r.range); if (rg) o.range = rg;
+    o.keep = !!r.keep;
+    return o;
+  },
+  remapDelete: (id) => ({ t: 'remap_delete', id: id }),
+  save: () => ({ t: 'save' }),
+  setTempo: (bpm) => ({ t: 'set_tempo', bpm: clampTempo(bpm) }),
+  setPlaying: (p) => ({ t: 'set_playing', playing: !!p }),
+};
+function isTempId(id) { return typeof id === 'string' && id.startsWith('tmp-'); }
+
+// Validate the rule form. fields: {id, dest, from, to, lo, hi, keep} (lo/hi strings).
+function parseRuleForm(f) {
+  const from = (f.from || '').trim(), to = (f.to || '').trim();
+  if (!f.dest) return { error: 'pick a destination' };
+  if (!from.startsWith('/')) return { error: 'from must start with /' };
+  if (!to.startsWith('/')) return { error: 'to must start with /' };
+  if (to.includes('*')) return { error: 'to cannot contain *' };
+  const los = String(f.lo == null ? '' : f.lo).trim(), his = String(f.hi == null ? '' : f.hi).trim();
+  let range;
+  if (los !== '' || his !== '') {
+    const lo = Number(los), hi = Number(his);
+    if (los === '' || his === '' || !isFinite(lo) || !isFinite(hi)) return { error: 'range needs both lo and hi numbers' };
+    range = [lo, hi];
+  }
+  const rule = { dest: f.dest, from: from, to: to, keep: !!f.keep };
+  if (f.id !== undefined && f.id !== null && f.id !== '') rule.id = f.id;
+  if (range) rule.range = range;
+  return { rule: rule };
+}
+
+// Apply a page edit to local state optimistically (the hub's next hello wins).
+let tmpSeq = 0;
+function applyLocalEdit(s, m) {
+  if (m.t === 'set_sync') {
+    if ('signal_delay_ms' in m) s.sync.signal_delay_ms = m.signal_delay_ms;
+    if ('td_round_trip_ms' in m) s.sync.td_round_trip_ms = m.td_round_trip_ms;
+  } else if (m.t === 'set_follow') {
+    const d = s.dests.find(x => x.name === m.dest);
+    if (d && d.kind === 'device') d.follow = m.follow;
+  } else if (m.t === 'remap_upsert') {
+    const r = normRemap(m);
+    if (m.id === undefined) { r.id = 'tmp-' + (++tmpSeq); s.remaps.push(r); }
+    else { const i = s.remaps.findIndex(x => x.id === m.id); if (i >= 0) s.remaps[i] = r; else s.remaps.push(r); }
+  } else if (m.t === 'remap_delete') {
+    s.remaps = s.remaps.filter(x => x.id !== m.id);
+  } else if (m.t === 'watch') {
+    s.watch = m.addrs.slice();
+  }
+  if (m.t === 'set_sync' || m.t === 'set_follow' || m.t === 'remap_upsert' || m.t === 'remap_delete') s.unsaved = true;
+}
+
+// --- alignment helpers --------------------------------------------------------
+// The beat line at or nearest before nowUs, drawn (like the grid) at ts +
+// shiftUs — the anchored strip holds this line still at its centre while the
+// raw audio flows past it. null when there is no Link line to anchor to.
+function beatAnchor(links, nowUs, shiftUs) {
+  if (!links.length) return null;
+  const l = links[links.length - 1];
+  if (!(l.bpm > 0)) return null;
+  const periodUs = 60e6 / l.bpm;
+  const g = beatGrid(links, nowUs - 2.5 * periodUs, nowUs, shiftUs || 0);
+  if (!g.length) return null;
+  const a = g[g.length - 1];
+  return { ts: a.ts, beat: a.beat, bar: a.bar, playing: a.playing, periodUs: periodUs };
+}
+// Audio onsets from the per-block RMS: a jump over the recent mean, 100 ms refractory.
+function detectOnsets(ring, fromUs, toUs) {
+  const out = [];
+  let i = Math.max(ring.first() + 8, ring.lowerBound(fromUs));
+  let lastOn = -Infinity;
+  for (; i < ring.count; i++) {
+    const k = ring.at(i), t = ring.ts[k];
+    if (t > toUs) break;
+    let mean = 0; for (let j = 1; j <= 8; j++) mean += ring.rms[ring.at(i - j)]; mean /= 8;
+    const r = ring.rms[k];
+    if (r > 0.05 && r > 2.5 * mean + 0.02 && t - lastOn > 100e3) { out.push(t); lastOn = t; }
+  }
+  return out;
+}
+// For each note-on (shifted by dMs) in [fromUs,toUs], lag to the nearest audio
+// onset within ±250 ms. medianMs > 0 means the sound comes after the marker:
+// add that much delay.
+function alignStats(s, dMs, fromUs, toUs) {
+  const ons = detectOnsets(s.audio, fromUs - 300e3, toUs + 300e3);
+  const lags = [];
+  for (const e of s.midi) {
+    if (e.kind !== 'noteon') continue;
+    const t = shiftTs(e.ts, dMs);
+    if (t < fromUs || t > toUs) continue;
+    let best = null;
+    for (const o of ons) { const d = o - t; if (Math.abs(d) <= 250e3 && (best === null || Math.abs(d) < Math.abs(best))) best = d; }
+    if (best !== null) lags.push(best / 1000);
+  }
+  if (!lags.length) return { n: 0, medianMs: null };
+  lags.sort((a, b) => a - b);
+  const m = lags.length >> 1;
+  return { n: lags.length, medianMs: lags.length % 2 ? lags[m] : (lags[m - 1] + lags[m]) / 2 };
+}
+
+// --- mock hub (?mock=1) --------------------------------------------------------
+// Deterministic given the tick times. Kicks at 120 bpm; MIDI note-ons lead the
+// kicks by leadMs (the audio is made from them, so it arrives after); an OSC
+// trigger leads them by oscLeadMs. The ts it reports is the un-delayed hub time,
+// exactly like the real hub: delays only move what the page draws, so set the
+// signal delay to leadMs and the markers sit on the kicks.
+function createMockHub(opts) {
+  const o = Object.assign({ bpm: 120, leadMs: 70, oscLeadMs: 40, sampleRate: 48000 }, opts || {});
+  const beatUs = 60e6 / o.bpm, bd = blockDurUs(o.sampleRate), sr = o.sampleRate;
+  const kickOffsetUs = 250e3;      // first kick 250 ms after start
+  let t0 = null, lastUs = null, framesDone = 0, pendingBlocks = [], pendingTs = 0, lastAudioSend = 0;
+  let lastAddrs = 0, lastOscSample = 0, lastCc = 0, lastBpm = 0, questPresent = false, nextId = 2;
+  // Link: beat k sits on the k-th MIDI note-on (kick - leadMs), quantum 4, so
+  // bars land on the accented kicks once the signal delay is leadMs. set_tempo
+  // re-anchors the beat line at the current instant (the kick audio keeps its tempo).
+  const link = { anchorTs: null, anchorBeat: 0, bpm: o.bpm, playing: true, lastSend: -Infinity };
+  const linkBeat = (t) => link.anchorBeat + (t - link.anchorTs) * link.bpm / 60e6;
+  const linkMsg = (t) => ({ t: 'link', ts: t, beat: linkBeat(t), bpm: link.bpm, quantum: 4, playing: link.playing, peers: 1 });
+  let rng = 12345;
+  const rnd = () => ((rng = (rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) * 2 - 1;
+  const st = {
+    dests: [
+      { name: 'engine', kind: 'engine' },
+      { name: 'td', kind: 'td' },
+      { name: 'monitor', kind: 'monitor' },
+      { name: 'editor', kind: 'device', follow: 'td' },
+    ],
+    sync: { signal_delay_ms: 0, td_round_trip_ms: 0 },
+    questFollow: 'td',
+    remaps: [{ id: 1, dest: 'td', from: '/tussen/*/head/n/yaw', to: '/td/yaw', range: [0, 1], keep: false }],
+    watch: [], saves: 0,
+  };
+  const seen = new Map();     // addr -> {last_ts, hits: [ts...], v, count}
+  const errors = [];          // protocol violations from the page
+  const out = [];
+  const touch = (addr, ts, v, dir) => { let e = seen.get(addr); if (!e) { e = { last_ts: ts, hits: [], v: 0, min: v, max: v, count: 0, dirs: 0 }; seen.set(addr, e); } e.last_ts = ts; e.v = v; e.min = Math.min(e.min, v); e.max = Math.max(e.max, v); e.count++; e.dirs |= dir; e.hits.push(ts); if (e.hits.length > 400) e.hits.splice(0, 200); };
+  const MOCK_OSC = { port: 9000, ips: ['192.0.2.10'], hostname: 'mock-hub.local' };
+  const helloMsg = () => ({ t: 'hello', sync: Object.assign({}, st.sync), dests: allDests(), remaps: st.remaps.map(r => Object.assign({}, r)), sample_rate: sr, osc: Object.assign({}, MOCK_OSC, { ips: MOCK_OSC.ips.slice() }) });
+  const allDests = () => st.dests.concat(questPresent ? [{ name: 'quest', kind: 'device', follow: st.questFollow }] : []).map(d => Object.assign({}, d));
+  // MIDI/clock signals are hub-made (out, like the real hub's generated
+  // ones); device and /ext/ OSC arrives on :9000 (in).
+  function emitMidi(ts, addr, v) { touch(addr, ts, v, 2); out.push({ t: 'midi', ts: ts, addr: addr, v: v }); }
+  function emitOsc(ts, addr, v, src) { touch(addr, ts, v, 1); if (st.watch.includes('*') || st.watch.includes(addr)) out.push({ t: 'osc', ts: ts, addr: addr, v: v, src: src }); }
+  function kickSample(tUs) {
+    const rel = tUs - t0 - kickOffsetUs;
+    let y = 0.004 * rnd();
+    if (rel >= 0) {
+      const k = Math.floor(rel / beatUs), dt = (rel - k * beatUs) / 1e6;
+      y += 0.9 * Math.exp(-dt / 0.09) * Math.sin(2 * Math.PI * (48 * dt + 3.6 * (1 - Math.exp(-dt / 0.03))));
+      const dh = (rel - (k + 0.5) * beatUs) / 1e6;
+      if (dh >= 0) y += 0.12 * Math.exp(-dh / 0.015) * rnd();
+    }
+    return y;
+  }
+  // events whose time lies in (a, b]: times = t0 + kickOffset + k*beat + off
+  function beatTimesIn(a, b, offUs) {
+    const base = t0 + kickOffsetUs + offUs, res = [];
+    let k = Math.ceil((a - base) / beatUs); if ((base + k * beatUs) <= a) k++;
+    for (; base + k * beatUs <= b; k++) if (k >= 0) res.push({ k: k, ts: base + k * beatUs });
+    return res;
+  }
+  function tick(nowUs) {
+    if (t0 === null) { t0 = nowUs; lastUs = nowUs; out.push(helloMsg()); link.anchorTs = t0 + kickOffsetUs - o.leadMs * 1000; }
+    const a = lastUs, b = nowUs;
+    if (b - link.lastSend >= 250e3) { link.lastSend = b; out.push(linkMsg(b)); }
+    // presence of a second device, toggling every 20 s
+    const q = Math.floor((b - t0) / 20e6) % 2 === 1;
+    if (q !== questPresent) { questPresent = q; out.push({ t: 'dests', dests: allDests() }); }
+    // audio blocks fully elapsed by now
+    while (t0 + (framesDone + BLOCK_FRAMES) / sr * 1e6 <= b) {
+      const ts = t0 + framesDone / sr * 1e6;
+      let mn = Infinity, mx = -Infinity, sq = 0;
+      for (let i = 0; i < BLOCK_FRAMES; i++) { const y = kickSample(ts + i / sr * 1e6); if (y < mn) mn = y; if (y > mx) mx = y; sq += y * y; }
+      if (!pendingBlocks.length) pendingTs = ts;
+      pendingBlocks.push([round4(mn), round4(mx), round4(Math.sqrt(sq / BLOCK_FRAMES))]);
+      framesDone += BLOCK_FRAMES;
+    }
+    if (pendingBlocks.length && b - lastAudioSend >= 33333) {
+      out.push({ t: 'audio', ts: pendingTs, blocks: pendingBlocks }); pendingBlocks = []; lastAudioSend = Math.max(lastAudioSend + 33333, b - 33333);
+    }
+    // MIDI: note-on leads the kick by leadMs; note-off 120 ms later; onbeat with it
+    for (const e of beatTimesIn(a, b, -o.leadMs * 1000)) { emitMidi(e.ts, '/tussen/midi/note/36', e.k % 4 === 0 ? 1 : 0.8); emitMidi(e.ts, '/tussen/clock/onbeat', e.k); }
+    for (const e of beatTimesIn(a, b, -o.leadMs * 1000 + 120e3)) emitMidi(e.ts, '/tussen/midi/note/36', 0);
+    while (lastCc + 40e3 <= b) { lastCc = Math.max(lastCc + 40e3, b - 1e6); const ph = ((lastCc - t0) / 3e6) % 1; emitMidi(lastCc, '/tussen/midi/cc/1', round4(0.5 - 0.5 * Math.cos(2 * Math.PI * ph))); }
+    while (lastBpm + 100e3 <= b) { lastBpm = Math.max(lastBpm + 100e3, b - 1e6); emitMidi(lastBpm, '/tussen/clock/bpm', o.bpm); }
+    // OSC: a 30 Hz sweep, a head angle, the quest trigger leading kicks by oscLeadMs
+    while (lastOscSample + 33333 <= b) {
+      lastOscSample = Math.max(lastOscSample + 33333, b - 1e6);
+      const ts = lastOscSample, el = (ts - t0) / 1e6;
+      const tri = (el / 4) % 1; emitOsc(ts, '/ext/tablet/fader1', round4(tri < 0.5 ? tri * 2 : 2 - tri * 2), '192.0.2.31');
+      emitOsc(ts, '/tussen/editor/head/n/yaw', round4(0.5 + 0.4 * Math.sin(el * Math.PI)), 'editor');
+      if (el % 30 >= 10 && el % 30 < 20) emitOsc(ts, '/ext/tablet/fader2', round4(0.5 + 0.5 * Math.sin(el * 3)), '192.0.2.31');
+      if (el % 7 < 1) emitOsc(ts, '/ext/sensor/knob', round4((el % 7)), '192.0.2.40');   // the wiggled control
+    }
+    if (questPresent) for (const e of beatTimesIn(a, b, -o.oscLeadMs * 1000)) if (e.k % 2 === 0) { emitOsc(e.ts, '/tussen/quest/controller/trigger', 1, 'quest'); }
+    if (questPresent) for (const e of beatTimesIn(a, b, -o.oscLeadMs * 1000 + 80e3)) if (e.k % 2 === 0) { emitOsc(e.ts, '/tussen/quest/controller/trigger', 0, 'quest'); }
+    if (b - lastAddrs >= 500e3) {
+      lastAddrs = b;
+      // Like the real hub: permanent (nothing drops out) and sorted by
+      // address, with min/max per entry.
+      const list = [];
+      for (const [addr, e] of seen) {
+        let n = 0; for (let i = e.hits.length - 1; i >= 0 && e.hits[i] > b - 1e6; i--) n++;
+        list.push({ addr: addr, last_ts: e.last_ts, rate: n, v: e.v, min: e.min, max: e.max, count: e.count, dir: e.dirs === 1 ? 'in' : e.dirs === 2 ? 'out' : 'both' });
+      }
+      list.sort((a, b2) => (a.addr < b2.addr ? -1 : a.addr > b2.addr ? 1 : 0));
+      out.push({ t: 'addrs', list: list });
+    }
+    lastUs = b;
+    return out.splice(0, out.length);
+  }
+  const ALLOWED = { watch: ['addrs'], set_sync: ['signal_delay_ms', 'td_round_trip_ms'], set_follow: ['dest', 'follow'], remap_upsert: ['id', 'dest', 'from', 'to', 'range', 'keep'], remap_delete: ['id'], save: [], set_tempo: ['bpm'], set_playing: ['playing'] };
+  function onMessage(m) {
+    if (!m || !(m.t in ALLOWED)) { errors.push('unknown message ' + JSON.stringify(m)); return; }
+    for (const k of Object.keys(m)) if (k !== 't' && !ALLOWED[m.t].includes(k)) errors.push(m.t + ': unknown field ' + k);
+    switch (m.t) {
+      case 'watch': st.watch = m.addrs.slice(); return;
+      case 'set_sync': {
+        const ks = ['signal_delay_ms', 'td_round_trip_ms'].filter(k => k in m);
+        if (!ks.length) errors.push('set_sync: nothing to set');
+        for (const k of ks) {
+          if (Number.isInteger(m[k]) && m[k] >= 0 && m[k] <= MAX_DELAY_MS) st.sync[k] = m[k];
+          else errors.push('set_sync: ' + k + ' must be an integer 0..' + MAX_DELAY_MS + ', got ' + m[k]);
+        }
+        out.push(helloMsg()); return;
+      }
+      case 'set_follow': {
+        // unknown or static (non-device) dest: ignored; the hello re-send corrects the page
+        if (!FOLLOWS.includes(m.follow)) errors.push('set_follow: follow must be td|music, got ' + m.follow);
+        else if (m.dest === 'quest' && questPresent) st.questFollow = m.follow;
+        else { const d = st.dests.find(x => x.name === m.dest); if (d && d.kind === 'device') d.follow = m.follow; }
+        out.push(helloMsg()); return;
+      }
+      case 'remap_upsert': {
+        const r = { id: m.id === undefined ? nextId++ : m.id, dest: m.dest, from: m.from, to: m.to, keep: !!m.keep };
+        if (m.range) r.range = m.range;
+        const i = st.remaps.findIndex(x => x.id === r.id);
+        if (i >= 0) st.remaps[i] = r; else st.remaps.push(r);
+        out.push(helloMsg()); return;
+      }
+      case 'remap_delete': st.remaps = st.remaps.filter(x => x.id !== m.id); out.push(helloMsg()); return;
+      case 'save': st.saves++; out.push({ t: 'saved', ok: true, path: '/mock/hub.toml' }); return;
+      case 'set_tempo': case 'set_playing': {
+        if (m.t === 'set_tempo' && !(typeof m.bpm === 'number' && m.bpm >= TEMPO_MIN && m.bpm <= TEMPO_MAX)) { errors.push('set_tempo: bpm out of range ' + m.bpm); return; }
+        if (m.t === 'set_playing' && typeof m.playing !== 'boolean') { errors.push('set_playing: playing must be a bool'); return; }
+        if (link.anchorTs !== null) { link.anchorBeat = linkBeat(lastUs); link.anchorTs = lastUs; }
+        if (m.t === 'set_tempo') link.bpm = m.bpm; else link.playing = m.playing;
+        if (link.anchorTs !== null) out.push(linkMsg(lastUs));
+        return;
+      }
+    }
+  }
+  return { tick: tick, onMessage: onMessage, errors: errors, state: st, opts: o, kickTimeUs: (k) => t0 + kickOffsetUs + k * beatUs };
+}
+function round4(x) { return Math.round(x * 1e4) / 1e4; }
+
+const api = {
+  BLOCK_FRAMES, MAX_DELAY_MS, FOLLOWS, KEEP_US, MIN_WINDOW_US, MAX_WINDOW_US,
+  TEMPO_MIN, TEMPO_MAX, LINK_KEEP, LINK_STALE_MS, clampTempo, beatGrid, linkLive,
+  signalClass, clampDelay, signalDelayMs, audioDelayMs, shiftTs,
+  timeToX, xToTime, zoomView, gridStepMs, blockDurUs,
+  AudioRing, midiKind, createState, resetBuffers, applyMessage, sortedAddrs, isHot, HEAT_MS, matchPattern,
+  HISTORY_CAP, histPush, historyRows, seenRows, endpointText, endpointLines,
+  msg, isTempId, parseRuleForm, applyLocalEdit, detectOnsets, alignStats, beatAnchor, createMockHub,
+};
+if (typeof module !== 'undefined' && module.exports) module.exports = api;
+else root.TC = api;
+})(this);
+</script>
+
+<script id="ui">
+(function () {
+'use strict';
+const L = window.TC;
+const $ = (s) => document.querySelector(s);
+const S = L.createState();
+const params = new URLSearchParams(location.search);
+const MOCK = params.get('mock') === '1';
+const LS = (k, d) => { try { const v = localStorage.getItem('tussen.console.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } };
+const LSset = (k, v) => { try { localStorage.setItem('tussen.console.' + k, JSON.stringify(v)); } catch (e) {} };
+
+S.watch = params.has('watch') ? params.get('watch').split(',').filter(Boolean) : LS('watch', []);
+const view = { endUs: 0, windowUs: LS('windowUs', 2e6) };
+let paused = false, gain = 1, mouseX = null, selMarker = null, dragX = null;
+let conn = null, connState = 'connecting';
+const pending = new Map();           // coalesced outgoing messages, flushed once per frame
+const lastEdit = new Map();          // control key -> local ms of last user edit
+const nowLocalUs = () => performance.now() * 1000;
+let off = { us: null, atLocal: 0 };  // hub clock = local clock + off.us
+
+// ---- transport -------------------------------------------------------------
+// The hub-side watch is the lanes plus "*" while the osc tab is open (the
+// live history needs everything); S.watch itself stays the lanes only.
+let oscTab = false;
+function watchMsg() { return { t: 'watch', addrs: oscTab ? S.watch.concat(['*']) : S.watch.slice() }; }
+function sendNow(m) { if (conn) conn.send(JSON.stringify(m)); }
+function send(key, m) { L.applyLocalEdit(S, m); pending.set(key, m); }
+function flush() { for (const m of pending.values()) sendNow(m); pending.clear(); }
+
+function onHubText(text) {
+  let m; try { m = JSON.parse(text); } catch (e) { return; }
+  const t = L.applyMessage(S, m, performance.now());
+  if (t === 'audio' || t === 'midi' || t === 'osc') {
+    const cand = S.latestTs - nowLocalUs(), l = nowLocalUs();
+    if (off.us === null || cand > off.us || l - off.atLocal > 2e6 || cand < off.us - 1e6) { off.us = cand; off.atLocal = l; }
+  }
+  if (t === 'hello') { if (S.helloCount === 1 || connJustOpened) { connJustOpened = false; sendNow(watchMsg()); } rebuildDests(); renderRules(); renderUnsaved(); renderEndpoint(); }
+  else if (t === 'dests') rebuildDests();
+  else if (t === 'addrs') renderAddrs();
+  else if (t === 'saved') { renderSaved(); renderUnsaved(); }
+  else if (t === 'link') renderLink();
+}
+function latestLink() { return S.links.length ? S.links[S.links.length - 1] : null; }
+function renderLink() {
+  const live = L.linkLive(S, performance.now()), l = latestLink(), n = $('#bpm'), p = $('#play');
+  $('#linkst').textContent = live ? 'Link ' + l.peers + ' peer' + (l.peers === 1 ? '' : 's') : 'no Link';
+  $('#linkst').className = live ? '' : 'dim';
+  n.disabled = p.disabled = !live;
+  if (!live) return;
+  if (performance.now() - (lastEdit.get('bpm') || 0) > 600 && document.activeElement !== n) n.value = Math.round(l.bpm * 10) / 10;
+  p.textContent = l.playing ? '■ stop' : '▶ start';
+}
+$('#bpm').addEventListener('input', () => lastEdit.set('bpm', performance.now()));
+$('#bpm').addEventListener('change', () => { const n = $('#bpm'); if (n.value === '') return; const m = L.msg.setTempo(n.value); n.value = m.bpm; lastEdit.set('bpm', performance.now()); send('bpm', m); });
+$('#play').onclick = () => { const l = latestLink(); if (l) send('play', L.msg.setPlaying(!l.playing)); };
+setInterval(renderLink, 250);   // "no Link" once messages stop
+let connJustOpened = false;
+function setConn(state, text) { connState = state; const p = $('#conn'); p.className = 'pill ' + (state === 'open' ? (MOCK ? 'mock' : 'ok') : 'bad'); p.textContent = text; }
+
+function connectMock() {
+  const hub = L.createMockHub({ leadMs: Number(params.get('lead') || 70), oscLeadMs: Number(params.get('osclead') || 40) });
+  conn = { send: (txt) => hub.onMessage(JSON.parse(txt)) };
+  S.freshConnection = true; connJustOpened = true;
+  setConn('open', 'MOCK hub (lead ' + hub.opts.leadMs + ' ms)');
+  setInterval(() => { for (const m of hub.tick(nowLocalUs())) onHubText(JSON.stringify(m)); if (hub.errors.length) console.warn('mock protocol errors', hub.errors.splice(0)); }, 15);
+}
+let backoff = 500;
+function connectWs() {
+  setConn('connecting', 'connecting…');
+  let ws;
+  try { ws = new WebSocket('ws://' + location.host + '/ws'); } catch (e) { return retry(); }
+  ws.onopen = () => { conn = ws; backoff = 500; S.freshConnection = true; connJustOpened = true; setConn('open', 'hub ' + location.host); };
+  ws.onmessage = (ev) => onHubText(ev.data);
+  ws.onclose = () => { if (conn === ws) conn = null; retry(); };
+  ws.onerror = () => {};
+  function retry() { setConn('closed', 'reconnecting in ' + (backoff / 1000).toFixed(1) + ' s'); setTimeout(connectWs, backoff); backoff = Math.min(5000, backoff * 2); }
+}
+
+// ---- sync points / destinations ----------------------------------------------
+const SLIDER_MAX_MS = 1000;   // the number box goes to MAX_DELAY_MS
+function sigMs() { return S.sync.signal_delay_ms; }
+function delayControl(key, value, disabled, onSet) {
+  const span = document.createElement('span'); span.className = 'dl'; span.dataset.key = key;
+  const mk = (tag, attrs) => { const e = document.createElement(tag); Object.assign(e, attrs); if (disabled) e.disabled = true; span.appendChild(e); return e; };
+  const set = (v) => { lastEdit.set(key, performance.now()); onSet(v); sync(v); };
+  mk('button', { textContent: '−10', onclick: () => set(cur() - 10) });
+  mk('button', { textContent: '−1', onclick: () => set(cur() - 1) });
+  const r = mk('input', { type: 'range', min: 0, max: SLIDER_MAX_MS, step: 1, value: value, oninput: () => set(Number(r.value)) });
+  const n = mk('input', { type: 'number', min: 0, max: L.MAX_DELAY_MS, step: 1, value: value, oninput: () => { if (n.value !== '') set(Number(n.value)); } });
+  mk('button', { textContent: '+1', onclick: () => set(cur() + 1) });
+  mk('button', { textContent: '+10', onclick: () => set(cur() + 10) });
+  function cur() { return Number(n.value) || 0; }
+  function sync(v) { v = L.clampDelay(v); if (document.activeElement !== n) n.value = v; r.value = v; }
+  span.update = (v) => { if (performance.now() - (lastEdit.get(key) || 0) < 600) return; if (document.activeElement !== n) n.value = v; if (document.activeElement !== r) r.value = v; };
+  return span;
+}
+// set_sync is coalesced per field (one pending key each), so a message carries only what moved
+const sigCtl = delayControl('sig', 0, false, (v) => { send('sig', L.msg.setSync({ signal_delay_ms: v })); renderDestDelays(); });
+const rtCtl = delayControl('rt', 0, false, (v) => { send('rt', L.msg.setSync({ td_round_trip_ms: v })); renderDestDelays(); });
+$('#sigctl').appendChild(sigCtl); $('#rtctl').appendChild(rtCtl);
+const FOLLOW_LABEL = { td: 'in time with TD', music: 'in time with the music' };
+const NEVER = { engine: 'makes the audio; never delayed', monitor: 'hears the raw audio; never delayed' };
+const rows = new Map();   // dest name -> {tr, follow, sig, aud}
+function rebuildDests() {
+  const tb = $('#dests tbody');
+  const names = new Set(S.dests.map(d => d.name));
+  for (const [name, r] of rows) if (!names.has(name) || r.kind !== S.dests.find(d => d.name === name).kind) { r.tr.remove(); rows.delete(name); }
+  for (const d of S.dests) {
+    let r = rows.get(d.name);
+    if (!r) {
+      const tr = document.createElement('tr'); tr.dataset.dest = d.name; if (d.kind === 'engine' || d.kind === 'monitor') tr.className = 'engine';
+      const td = () => { const c = document.createElement('td'); tr.appendChild(c); return c; };
+      td().innerHTML = '<b>' + esc(d.name) + '</b>';
+      td().innerHTML = '<span class="dim">' + esc(d.kind) + '</span>';
+      const fc = td(); let follow = null;
+      if (d.kind === 'device') {
+        follow = document.createElement('select'); follow.className = 'follow';
+        follow.innerHTML = L.FOLLOWS.map(f => '<option value="' + f + '">' + FOLLOW_LABEL[f] + '</option>').join('');
+        follow.value = d.follow;
+        follow.onchange = () => { lastEdit.set('f:' + d.name, performance.now()); send('f:' + d.name, L.msg.setFollow(d.name, follow.value)); renderDestDelays(); renderUnsaved(); };
+        fc.appendChild(follow);
+      } else if (NEVER[d.kind]) fc.innerHTML = '<span class="note">' + NEVER[d.kind] + '</span>';
+      else if (d.kind === 'td') fc.innerHTML = '<span class="note">sync point 1</span>';
+      r = { tr: tr, kind: d.kind, follow: follow, sig: td(), aud: td() };
+      rows.set(d.name, r);
+    }
+    tb.appendChild(r.tr);   // keeps hub order
+    if (r.follow && performance.now() - (lastEdit.get('f:' + d.name) || 0) > 600 && document.activeElement !== r.follow) r.follow.value = d.follow;
+  }
+  sigCtl.update(S.sync.signal_delay_ms); rtCtl.update(S.sync.td_round_trip_ms);
+  renderDestDelays();
+  const rd = $('#rdest'), keep = rd.value; rd.innerHTML = S.dests.map(d => '<option>' + esc(d.name) + '</option>').join(''); if (keep && names.has(keep)) rd.value = keep;
+}
+// the effective delay per destination, read-only: signals ms / audio ms
+function renderDestDelays() {
+  for (const d of S.dests) {
+    const r = rows.get(d.name); if (!r) continue;
+    r.sig.textContent = L.signalDelayMs(d, S.sync); r.aud.textContent = L.audioDelayMs(d, S.sync);
+  }
+}
+
+// ---- addresses / rules -------------------------------------------------------
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
+function renderAddrs() {
+  const now = performance.now(), list = L.sortedAddrs(S.addrs, $('#filter').value, S.addrHeat, now);
+  const ref = Math.max(S.latestTs, ...S.addrs.map(a => a.last_ts));
+  const lim = Math.min(list.length, 300);
+  let h = '';
+  for (let i = 0; i < lim; i++) {
+    const a = list[i], cls = L.signalClass(a.addr);
+    const hot = L.isHot(S.addrHeat, a.addr, now);
+    const w = S.watch.includes(a.addr);
+    const rm = S.remaps.some(r => L.matchPattern(r.from, a.addr));
+    h += '<tr data-a="' + esc(a.addr) + '" class="' + (hot ? 'hot ' : '') + (w ? 'w' : '') + '"><td class="addr">' + (w ? '★ ' : '') + esc(a.addr) + (rm ? ' <span class="dim">⇢</span>' : '') +
+      '</td><td class="cls-' + cls + '">' + cls + '</td><td>' + (+a.rate).toFixed(1) + '</td><td class="v">' + (a.min == null ? '—' : fmtV(a.min)) + '</td><td class="v">' + (a.max == null ? '—' : fmtV(a.max)) + '</td><td>' + Math.max(0, (ref - a.last_ts) / 1e6).toFixed(1) + '</td></tr>';
+  }
+  $('#addrs tbody').innerHTML = h;
+  $('#acount').textContent = list.length + ' / ' + S.addrs.length + (list.length > lim ? ' (first ' + lim + ')' : '');
+}
+$('#addrs').addEventListener('click', (ev) => {
+  const tr = ev.target.closest('tr[data-a]'); if (!tr) return;
+  const a = tr.dataset.a;
+  const w = S.watch.includes(a) ? S.watch.filter(x => x !== a) : S.watch.concat([a]);
+  LSset('watch', w); L.applyLocalEdit(S, L.msg.watch(w)); pending.set('watch', watchMsg());
+  editing = null; $('#rfrom').value = a; $('#rto').value = ''; $('#rlo').value = ''; $('#rhi').value = ''; $('#rkeep').checked = false;
+  $('#rsubmit').textContent = 'add rule'; $('#rto').focus();
+  renderAddrs(); sizeCanvas();
+});
+$('#filter').addEventListener('input', renderAddrs);
+let editing = null;
+function renderRules() {
+  $('#rules tbody').innerHTML = S.remaps.map((r, i) => '<tr data-i="' + i + '"><td>' + esc(r.dest) + '</td><td>' + esc(r.from) + '</td><td>' + esc(r.to) + '</td><td>' +
+    (r.range ? r.range[0] + '…' + r.range[1] : '<span class="dim">—</span>') + '</td><td>' + (r.keep ? 'keep' : '<span class="dim">replace</span>') + '</td><td>' +
+    (L.isTempId(r.id) ? '<span class="dim">pending</span>' : '<button data-act="edit">edit</button> <button data-act="del">delete</button>') + '</td></tr>').join('');
+}
+$('#rules').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-act]'); if (!b) return;
+  const r = S.remaps[Number(b.closest('tr').dataset.i)]; if (!r) return;
+  if (b.dataset.act === 'del') { send('rdel:' + r.id, L.msg.remapDelete(r.id)); renderRules(); renderUnsaved(); }
+  else { editing = r.id; $('#rdest').value = r.dest; $('#rfrom').value = r.from; $('#rto').value = r.to; $('#rlo').value = r.range ? r.range[0] : ''; $('#rhi').value = r.range ? r.range[1] : ''; $('#rkeep').checked = r.keep; $('#rsubmit').textContent = 'update rule'; }
+});
+$('#rsubmit').onclick = () => {
+  const p = L.parseRuleForm({ id: editing, dest: $('#rdest').value, from: $('#rfrom').value, to: $('#rto').value, lo: $('#rlo').value, hi: $('#rhi').value, keep: $('#rkeep').checked });
+  $('#rerr').textContent = p.error || '';
+  if (p.error) return;
+  send('rup:' + (editing === null ? Math.random() : editing), L.msg.remapUpsert(p.rule));
+  editing = null; $('#rsubmit').textContent = 'add rule'; renderRules(); renderUnsaved();
+};
+$('#rclear').onclick = () => { editing = null; for (const id of ['#rfrom', '#rto', '#rlo', '#rhi']) $(id).value = ''; $('#rkeep').checked = false; $('#rsubmit').textContent = 'add rule'; $('#rerr').textContent = ''; };
+
+// ---- OSC endpoint (copy to hand to a sender on another laptop) -----------------
+function renderEndpoint() {
+  const t = L.endpointText(S.oscEndpoint);
+  $('#eptext').textContent = t || 'no network';
+  $('#epcopy').disabled = !t;
+  const lines = L.endpointLines(S.oscEndpoint);
+  if (lines.length) $('#endpoint').title = 'where OSC senders (djay Pro, tablets, scripts) send, UDP:\n' + lines.join('\n');
+}
+function copyText(t, done) {
+  const fb = () => {
+    const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    ta.remove(); done(ok);
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).then(() => done(true), fb); else fb();
+}
+$('#epcopy').onclick = () => {
+  const t = L.endpointText(S.oscEndpoint); if (!t) return;
+  copyText(t, (ok) => { const b = $('#epcopy'); b.textContent = ok ? '✓ copied' : '✗ select + ⌘C'; setTimeout(() => { b.textContent = '⧉ copy'; }, 1400); });
+};
+
+// ---- osc tab: live history + every address seen --------------------------------
+let histPaused = false;
+function fmtV(v) { return typeof v === 'number' ? (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(3)) : esc(v); }
+function renderHistory() {
+  const LIMIT = 300, rows = L.historyRows(S, $('#histfilter').value, LIMIT);
+  let h = '';
+  for (const e of rows) {
+    const cls = L.signalClass(e.addr);
+    h += '<tr><td class="v">' + (e.ts / 1e6).toFixed(2) + '</td><td class="addr cls-' + cls + '">' + esc(e.addr) + '</td><td class="v">' + fmtV(e.v) + '</td><td class="dim">' + esc(e.src) + '</td></tr>';
+  }
+  $('#hist tbody').innerHTML = h;
+  $('#histcount').textContent = S.history.total + ' messages' + (rows.length === LIMIT ? ' (newest ' + LIMIT + ' shown)' : '');
+}
+function renderSeen() {
+  const rows = L.seenRows(S, $('#seenfilter').value);
+  const ref = Math.max(S.latestTs, ...S.addrs.map(a => a.last_ts));
+  const lim = Math.min(rows.length, 500);
+  let h = '';
+  for (let i = 0; i < lim; i++) {
+    const a = rows[i], cls = L.signalClass(a.addr);
+    h += '<tr><td class="addr">' + esc(a.addr) + '</td><td>' + esc(a.dir || '—') + '</td><td class="cls-' + cls + '">' + cls + '</td><td class="v">' + (a.count == null ? '—' : a.count) + '</td><td class="v">' + (a.min == null ? '—' : fmtV(a.min)) + '</td><td class="v">' + (a.v == null ? '—' : fmtV(a.v)) + '</td><td class="v">' + (a.max == null ? '—' : fmtV(a.max)) + '</td><td class="v">' + Math.max(0, (ref - a.last_ts) / 1e6).toFixed(1) + '</td></tr>';
+  }
+  $('#seen tbody').innerHTML = h;
+  $('#seencount').textContent = rows.length + ' address' + (rows.length === 1 ? '' : 'es') + (lim < rows.length ? ' (first ' + lim + ')' : '');
+}
+// Batched DOM: the ring fills at any rate; the tables redraw at 4 Hz, only
+// while the tab is visible (and the history only while not paused).
+setInterval(() => { if (!oscTab) return; if (!histPaused) renderHistory(); renderSeen(); }, 250);
+$('#histpause').onclick = () => { histPaused = !histPaused; const b = $('#histpause'); b.textContent = histPaused ? '▶ live' : '⏸ pause'; b.classList.toggle('on', histPaused); if (!histPaused) renderHistory(); };
+$('#histfilter').addEventListener('input', renderHistory);
+$('#seenfilter').addEventListener('input', renderSeen);
+function setTab(osc) {
+  oscTab = osc;
+  document.body.classList.toggle('tab-osc', osc);
+  $('#tab-osc').classList.toggle('on', osc); $('#tab-sync').classList.toggle('on', !osc);
+  pending.set('watch', watchMsg());   // '*' on while the history is visible, off when it isn't
+  if (osc) { renderHistory(); renderSeen(); } else sizeCanvas();
+}
+$('#tab-sync').onclick = () => setTab(false);
+$('#tab-osc').onclick = () => setTab(true);
+
+// ---- save --------------------------------------------------------------------
+$('#save').onclick = () => { flush(); sendNow(L.msg.save()); $('#savedmsg').className = ''; $('#savedmsg').textContent = 'saving…'; };
+function renderSaved() { const s = S.saved, e = $('#savedmsg'); e.className = s.ok ? 'ok' : 'err'; e.textContent = s.ok ? 'saved → ' + (s.path || '?') : 'save failed: ' + (s.error || 'unknown error'); }
+function renderUnsaved() { const e = $('#unsaved'); e.className = S.unsaved ? '' : 'clean'; e.textContent = S.unsaved ? '● unsaved changes' : 'saved state'; }
+
+// ---- timeline ----------------------------------------------------------------
+const cv = $('#tl'), ctx = cv.getContext('2d');
+const AUDIO_H = 200, MIDI_H = 34, LANE_H = 40, AXIS_H = 16;
+let W = 0, H = 0, dpr = 1;
+function sizeCanvas() {
+  dpr = window.devicePixelRatio || 1; W = cv.clientWidth; H = AXIS_H + AUDIO_H + MIDI_H + S.watch.length * LANE_H;
+  cv.style.height = H + 'px'; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  AWW = aw.clientWidth; aw.style.height = AW_H + 'px'; aw.width = Math.round(AWW * dpr); aw.height = Math.round(AW_H * dpr);
+}
+window.addEventListener('resize', sizeCanvas);
+function hubNowUs() { return off.us === null ? 0 : nowLocalUs() + off.us; }
+function markerX(e) { return L.timeToX(L.shiftTs(e.ts, sigMs()), view, W); }
+
+// The waveform (min/max + rms per block), raw hub time — shared by the
+// timeline and the anchored strip. c = a 2d context, v = {endUs, windowUs}.
+function paintAudio(c, v, Wpx, ay, ah) {
+  const ring = S.audio, bd = L.blockDurUs(S.sampleRate), tB = v.endUs;
+  c.fillStyle = '#20262e'; c.fillRect(0, ay, Wpx, 1);
+  let i = Math.max(ring.first(), ring.lowerBound(tB - v.windowUs - bd));
+  const pxPerBlock = bd / v.windowUs * Wpx;
+  const clampA = (x) => Math.max(-1, Math.min(1, x * gain));
+  if (pxPerBlock >= 1) {
+    for (; i < ring.count; i++) {
+      const k = ring.at(i), ts = ring.ts[k]; if (ts > tB) break;
+      const x0 = L.timeToX(ts, v, Wpx), x1 = L.timeToX(ts + bd, v, Wpx), w = Math.max(1, x1 - x0 - (pxPerBlock > 12 ? 1 : 0));
+      c.fillStyle = '#2e6b46'; const top = ay - clampA(ring.mx[k]) * ah, bot = ay - clampA(ring.mn[k]) * ah; c.fillRect(x0, top, w, Math.max(1, bot - top));
+      c.fillStyle = '#7ee2a8'; const r = clampA(ring.rms[k]) * ah; c.fillRect(x0, ay - r, w, Math.max(1, 2 * r));
+    }
+  } else {   // several blocks per pixel column: aggregate
+    let col = -1, mn = 0, mx = 0, rm = 0;
+    const put = () => { if (col < 0) return; c.fillStyle = '#2e6b46'; const top = ay - clampA(mx) * ah, bot = ay - clampA(mn) * ah; c.fillRect(col, top, 1, Math.max(1, bot - top)); c.fillStyle = '#7ee2a8'; const r = clampA(rm) * ah; c.fillRect(col, ay - r, 1, Math.max(1, 2 * r)); };
+    for (; i < ring.count; i++) {
+      const k = ring.at(i), ts = ring.ts[k]; if (ts > tB) break;
+      const cx = Math.floor(L.timeToX(ts, v, Wpx));
+      if (cx !== col) { put(); col = cx; mn = ring.mn[k]; mx = ring.mx[k]; rm = ring.rms[k]; }
+      else { if (ring.mn[k] < mn) mn = ring.mn[k]; if (ring.mx[k] > mx) mx = ring.mx[k]; if (ring.rms[k] > rm) rm = ring.rms[k]; }
+    }
+    put();
+  }
+}
+
+// ---- anchored alignment strip ------------------------------------------------
+// The purple beat line holds still at the centre; the raw audio flows past it,
+// MIDI markers ride at ts + signal delay like the timeline. Sliding (or
+// dragging, below) the signal delay slides the WAVEFORM under the line: when
+// the kicks sit on it, sync point 1 is set. Re-anchors every beat — beat-
+// periodic music looks stationary (a scope triggered on the beat).
+const aw = $('#aw'), actx = aw.getContext('2d');
+const AW_H = 110, AW_WIN = 1.6e6;
+let AWW = 0;
+function drawAnchor() {
+  if (oscTab || AWW <= 0) return;
+  actx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  actx.fillStyle = '#0b0d10'; actx.fillRect(0, 0, AWW, AW_H);
+  actx.font = '10px ui-monospace,Menlo,monospace'; actx.textBaseline = 'top';
+  const dSig = sigMs(), sh = dSig * 1000;
+  const a = L.beatAnchor(S.links, view.endUs, sh);
+  if (!a) {
+    actx.fillStyle = '#6e7781';
+    actx.fillText(connState !== 'open' ? 'not connected' : L.linkLive(S, performance.now()) ? 'waiting for a beat…' : 'no Link — the anchored view needs the beat grid', 8, AW_H / 2 - 5);
+    return;
+  }
+  const v = { endUs: a.ts + AW_WIN / 2, windowUs: AW_WIN };
+  // neighbouring beat lines (the same grid the timeline draws, same shift)
+  for (const g of L.beatGrid(S.links, v.endUs - v.windowUs, v.endUs, sh)) {
+    const x = Math.round(L.timeToX(g.ts, v, AWW)), al = g.playing ? 1 : 0.4;
+    actx.fillStyle = g.bar ? 'rgba(190,150,255,' + 0.55 * al + ')' : 'rgba(163,113,247,' + 0.35 * al + ')';
+    actx.fillRect(x, 0, 1, AW_H);
+  }
+  paintAudio(actx, v, AWW, AW_H / 2 + 6, AW_H / 2 - 18);
+  // MIDI markers, shifted like the timeline's
+  let lo = 0, hi = S.midi.length; while (lo < hi) { const m = (lo + hi) >> 1; if (S.midi[m].ts + sh < v.endUs - v.windowUs - 1e3) lo = m + 1; else hi = m; }
+  for (let j = lo; j < S.midi.length; j++) {
+    const e = S.midi[j], ts = e.ts + sh; if (ts > v.endUs + 1e3) break;
+    const x = Math.round(L.timeToX(ts, v, AWW)) + 0.5;
+    if (e.kind === 'noteon') { actx.fillStyle = '#f5a623'; actx.fillRect(x - 0.5, 13, 1, AW_H - 13); }
+    else if (e.kind === 'noteoff') { actx.fillStyle = '#8a5d14'; actx.fillRect(x - 0.5, AW_H - 6, 1, 6); }
+    else if (e.kind === 'cc') { actx.fillStyle = '#58a6ff'; const hh = 2 + e.v * 8; actx.fillRect(x - 0.5, AW_H - hh, 1, hh); }
+    else if (e.kind === 'beat') { actx.fillStyle = '#a371f7'; actx.fillRect(x - 2, AW_H - 3, 4, 3); }
+  }
+  // the fixed line, dead centre, on top (the anchor is a grid line: x = AWW/2)
+  actx.fillStyle = '#be96ff'; actx.fillRect(Math.round(AWW / 2) - 1, 0, 2, AW_H);
+  actx.fillStyle = '#6e7781';
+  actx.fillText('beat ' + a.beat + (a.bar ? ' · bar' : '') + '   markers +' + dSig + ' ms · audio raw · ' + Math.round(AW_WIN / 1000) + ' ms', 4, 2);
+}
+// Drag the waveform onto the line: the content follows the cursor, which means
+// the signal delay runs OPPOSITE the drag (audio draws at raw ts; the view is
+// pinned to the shifted anchor). Same coalesced set_sync path as the slider.
+let awDrag = null;   // {x0: clientX at mousedown, sh0: signal delay then}
+aw.addEventListener('mousedown', (ev) => {
+  if (AWW <= 0 || !L.beatAnchor(S.links, view.endUs, sigMs() * 1000)) return;
+  awDrag = { x0: ev.clientX, sh0: sigMs() };
+  aw.classList.add('dragging');
+  ev.preventDefault();
+});
+window.addEventListener('mousemove', (ev) => {
+  if (!awDrag || AWW <= 0) return;
+  const dMs = (ev.clientX - awDrag.x0) / AWW * (AW_WIN / 1000);
+  const v = L.clampDelay(awDrag.sh0 - dMs);
+  if (v !== sigMs()) { send('sig', L.msg.setSync({ signal_delay_ms: v })); sigCtl.update(v); renderDestDelays(); }
+});
+window.addEventListener('mouseup', () => { if (awDrag) { awDrag = null; aw.classList.remove('dragging'); renderUnsaved(); } });
+
+function draw() {
+  flush();
+  if (!paused) view.endUs = hubNowUs() - 40e3;    // 40 ms behind live: the newest audio batch has arrived
+  const dSig = sigMs();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, W, H);
+  const t0 = view.endUs - view.windowUs, t1 = view.endUs;
+  // grid + axis
+  const step = L.gridStepMs(view.windowUs, W, 70) * 1000;
+  ctx.font = '10px ui-monospace,Menlo,monospace'; ctx.textBaseline = 'top';
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) {
+    const x = Math.round(L.timeToX(t, view, W)) + 0.5;
+    ctx.fillStyle = '#1a2028'; ctx.fillRect(x - 0.5, AXIS_H, 1, H - AXIS_H);
+    ctx.fillStyle = '#6e7781'; ctx.fillText(Math.round((t - t1) / 1000) + ' ms', x + 2, 2);
+  }
+  // Link beat grid, under the audio, shifted like the MIDI markers (sync point 1)
+  const sh = dSig * 1000, grid = L.beatGrid(S.links, t0, t1, sh);
+  const beatPx = grid.length > 1 ? (grid[1].ts - grid[0].ts) / view.windowUs * W : W;
+  for (const g of grid) {
+    const x = Math.round(L.timeToX(g.ts, view, W)), al = g.playing ? 1 : 0.4;
+    if (g.bar) {
+      ctx.fillStyle = 'rgba(190,150,255,' + 0.7 * al + ')'; ctx.fillRect(x - 1, AXIS_H, 2, AUDIO_H);
+      ctx.fillStyle = 'rgba(190,150,255,' + 0.25 * al + ')'; ctx.fillRect(x - 1, AXIS_H + AUDIO_H, 2, MIDI_H);
+      const q = latestLink() ? latestLink().quantum : 4;
+      ctx.fillStyle = 'rgba(190,150,255,' + 0.9 * al + ')'; ctx.fillText('bar ' + (Math.round(g.beat / q) + 1), x + 3, AXIS_H + 14);
+    } else if (beatPx >= 4) { ctx.fillStyle = 'rgba(163,113,247,' + 0.5 * al + ')'; ctx.fillRect(x, AXIS_H, 1, AUDIO_H); }
+  }
+  // audio
+  paintAudio(ctx, view, W, AXIS_H + AUDIO_H / 2, AUDIO_H / 2 - 4);
+  ctx.fillStyle = '#6e7781'; ctx.fillText('audio (min/max, rms)  block ' + (L.blockDurUs(S.sampleRate) / 1000).toFixed(2) + ' ms', 4, AXIS_H + 2);
+  // MIDI
+  const my = AXIS_H + AUDIO_H, lanesBottom = H;
+  ctx.fillStyle = '#10141a'; ctx.fillRect(0, my, W, MIDI_H);
+  ctx.fillStyle = '#6e7781'; ctx.fillText('MIDI +' + dSig + ' ms (signal delay)', 4, my + 2);
+  // binary search start in midi array (ts ascending)
+  let lo = 0, hi = S.midi.length; while (lo < hi) { const m = (lo + hi) >> 1; if (S.midi[m].ts + sh < t0 - 1e3) lo = m + 1; else hi = m; }
+  for (let j = lo; j < S.midi.length; j++) {
+    const e = S.midi[j], ts = e.ts + sh; if (ts > t1 + 1e3) break;
+    const x = Math.round(L.timeToX(ts, view, W)) + 0.5;
+    if (e.kind === 'noteon') {
+      if (sh) { ctx.fillStyle = 'rgba(245,166,35,.25)'; const xr = Math.round(L.timeToX(e.ts, view, W)); for (let y = AXIS_H; y < my; y += 6) ctx.fillRect(xr, y, 1, 3); }
+      const sel = e === selMarker;
+      ctx.fillStyle = sel ? '#fff' : '#f5a623'; ctx.fillRect(x - (sel ? 1 : 0.5), AXIS_H, sel ? 2 : 1, lanesBottom - AXIS_H);
+      ctx.fillText(e.addr.slice(18) + ' ' + Math.round(e.v * 127), x + 2, my + 14);
+    } else if (e.kind === 'noteoff') { ctx.fillStyle = '#8a5d14'; ctx.fillRect(x - 0.5, my + MIDI_H - 6, 1, 6); }
+    else if (e.kind === 'cc') { ctx.fillStyle = '#58a6ff'; const hh = 2 + e.v * 10; ctx.fillRect(x - 0.5, my + MIDI_H - hh, 1, hh); }
+    else if (e.kind === 'beat') { ctx.fillStyle = '#a371f7'; ctx.fillRect(x - 2, my + MIDI_H - 3, 4, 3); }
+    else if (e.kind === 'ctl') { ctx.fillStyle = '#3fb950'; ctx.fillRect(x - 0.5, my + MIDI_H - 4, 1, 4); }
+  }
+  // OSC lanes
+  S.watch.forEach((addr, li) => {
+    const y0 = my + MIDI_H + li * LANE_H, ser = S.osc.get(addr), dl = dSig, s2 = sh;
+    ctx.fillStyle = li % 2 ? '#0d1014' : '#0f1318'; ctx.fillRect(0, y0, W, LANE_H);
+    ctx.fillStyle = '#1e2630'; ctx.fillRect(0, y0 + 3, W, 1); ctx.fillRect(0, y0 + LANE_H - 3, W, 1);
+    ctx.fillStyle = '#6e7781';
+    let label = addr + ' +' + dl + ' ms';
+    if (ser && ser.v.length) label += '  = ' + ser.v[ser.v.length - 1].toFixed(3) + '  src ' + ser.src;
+    ctx.fillText(label, 4, y0 + 4);
+    if (!ser) return;
+    const yv = (v) => y0 + LANE_H - 3 - Math.max(0, Math.min(1, v)) * (LANE_H - 6);
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1; ctx.beginPath();
+    let a = 0, b = ser.ts.length; while (a < b) { const m = (a + b) >> 1; if (ser.ts[m] + s2 < t0) a = m + 1; else b = m; }
+    a = Math.max(0, a - 1); let started = false, py = 0;
+    for (let j = a; j < ser.ts.length; j++) {
+      const x = L.timeToX(ser.ts[j] + s2, view, W), y = yv(ser.v[j]);
+      if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, py); ctx.lineTo(x, y); }   // sample-and-hold
+      py = y; if (ser.ts[j] + s2 > t1) break;
+    }
+    if (started && !paused) ctx.lineTo(W, py);
+    ctx.stroke();
+  });
+  // cursor + readout
+  let ro = paused ? '⏸ ' : '';
+  if (mouseX !== null) {
+    ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.fillRect(Math.round(mouseX), AXIS_H, 1, H - AXIS_H);
+    const ct = L.xToTime(mouseX, view, W);
+    ro += 'cursor ' + ((ct - view.endUs) / 1000).toFixed(1) + ' ms';
+    if (selMarker) ro += '   cursor − marker = ' + ((ct - (selMarker.ts + sh)) / 1000).toFixed(1) + ' ms';
+  } else ro += 'window ' + (view.windowUs / 1000).toFixed(0) + ' ms';
+  if (selMarker) { const sx = markerX(selMarker); ctx.fillStyle = '#fff'; ctx.fillText('sel', sx + 2, my - 12); }
+  $('#readout').textContent = ro;
+  if (connState !== 'open' || off.us === null) { ctx.fillStyle = '#6e7781'; ctx.fillText(connState === 'open' ? 'waiting for data…' : 'not connected', W / 2 - 40, AXIS_H + AUDIO_H / 2 - 20); }
+  drawAnchor();
+  requestAnimationFrame(draw);
+}
+// alignment hint, 4 Hz
+setInterval(() => {
+  const t1 = view.endUs, t0 = t1 - Math.max(view.windowUs, 4e6);
+  const a = L.alignStats(S, sigMs(), t0, t1);
+  $('#align').textContent = a.n ? 'note-on → nearest audio onset, median of ' + a.n + ': ' + (a.medianMs >= 0 ? '+' : '') + a.medianMs.toFixed(1) + ' ms (positive = add signal delay; ±' + (L.blockDurUs(S.sampleRate) / 1000).toFixed(1) + ' ms block resolution)' : 'no note-ons near audio onsets in view';
+}, 250);
+
+cv.addEventListener('mousemove', (ev) => {
+  const r = cv.getBoundingClientRect(); const x = ev.clientX - r.left;
+  if (dragX !== null && paused) { view.endUs -= (x - dragX) / W * view.windowUs; dragX = x; }
+  mouseX = x;
+});
+cv.addEventListener('mouseleave', () => { mouseX = null; dragX = null; });
+cv.addEventListener('mousedown', (ev) => {
+  const r = cv.getBoundingClientRect(), x = ev.clientX - r.left;
+  let best = null, bd = 6;
+  for (const e of S.midi) { if (e.kind !== 'noteon') continue; const dx = Math.abs(markerX(e) - x); if (dx < bd) { bd = dx; best = e; } }
+  if (best || !paused) selMarker = best;
+  if (!best) dragX = x;
+});
+window.addEventListener('mouseup', () => { dragX = null; });
+cv.addEventListener('wheel', (ev) => {
+  ev.preventDefault();
+  const r = cv.getBoundingClientRect(), x = ev.clientX - r.left;
+  const z = L.zoomView(view, Math.exp(ev.deltaY * 0.002), paused ? x : W, W);
+  view.windowUs = z.windowUs; if (paused) view.endUs = z.endUs;
+  $('#win').value = Math.round(view.windowUs / 1000); LSset('windowUs', view.windowUs);
+}, { passive: false });
+$('#win').addEventListener('change', () => { view.windowUs = Math.max(L.MIN_WINDOW_US, Math.min(L.MAX_WINDOW_US, Number($('#win').value) * 1000)); LSset('windowUs', view.windowUs); });
+$('#win').value = Math.round(view.windowUs / 1000);
+$('#gain').addEventListener('input', () => { gain = Number($('#gain').value) || 1; });
+function togglePause() { paused = !paused; $('#pause').textContent = paused ? '▶ live' : '⏸ pause'; }
+$('#pause').onclick = togglePause;
+window.addEventListener('keydown', (ev) => {
+  if (ev.target.closest && ev.target.closest('input,select,textarea')) return;
+  if (ev.code === 'Space') { ev.preventDefault(); togglePause(); }
+  else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
+    ev.preventDefault();
+    const step = (ev.shiftKey ? 10 : 1) * (ev.key === 'ArrowLeft' ? -1 : 1);
+    send('sig', L.msg.setSync({ signal_delay_ms: sigMs() + step }));
+    lastEdit.delete('sig'); rebuildDests(); renderUnsaved();
+  }
+});
+// any delay edit marks unsaved
+document.addEventListener('input', () => renderUnsaved()); document.addEventListener('click', () => setTimeout(renderUnsaved, 0));
+setInterval(renderAddrs, 500);   // keep the heat highlight fading even if addrs pause
+
+sizeCanvas(); renderRules(); renderUnsaved();
+if (MOCK) connectMock(); else connectWs();
+requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,321 @@
+# tussen signal catalog — optional. The monitor and the HUD
+# use it for labels and ranges; nothing depends on it being complete.
+# `{dev}` matches any device name (editor, phone, quest).
+#
+# Starter set: the head addresses. Add entries as signals appear.
+
+signals:
+  - address: /tussen/{dev}/head/pos/x
+    unit: m
+    label: head stage x
+  - address: /tussen/{dev}/head/pos/y
+    unit: m
+    label: head height above floor
+  - address: /tussen/{dev}/head/pos/z
+    unit: m
+    label: head stage z
+  - address: /tussen/{dev}/head/quat/x
+    label: head orientation x
+  - address: /tussen/{dev}/head/quat/y
+    label: head orientation y
+  - address: /tussen/{dev}/head/quat/z
+    label: head orientation z
+  - address: /tussen/{dev}/head/quat/w
+    label: head orientation w
+  - address: /tussen/{dev}/head/yaw
+    unit: deg
+    label: head yaw (positive = turned right)
+  - address: /tussen/{dev}/head/pitch
+    unit: deg
+    label: head pitch (positive = looking up)
+  - address: /tussen/{dev}/head/roll
+    unit: deg
+    label: head roll (positive = tilted right)
+  - address: /tussen/{dev}/head/n/yaw
+    unit: 0..1
+    label: yaw, -90..+90 deg
+  - address: /tussen/{dev}/head/n/pitch
+    unit: 0..1
+    label: pitch, -45..+45 deg
+  - address: /tussen/{dev}/head/n/roll
+    unit: 0..1
+    label: roll, -30..+30 deg
+  - address: /tussen/{dev}/head/n/height
+    unit: 0..1
+    label: height change since recenter, -0.4..+0.4 m
+  - address: /tussen/{dev}/head/n/x
+    unit: 0..1
+    label: stage x, -1.5..+1.5 m
+  - address: /tussen/{dev}/head/n/z
+    unit: 0..1
+    label: stage z, -1.5..+1.5 m
+  - address: /tussen/{dev}/head/n/speed
+    unit: 0..1
+    label: speed, 0..1.5 m/s
+  - address: /tussen/{dev}/head/n/turn
+    unit: 0..1
+    label: angular speed, 0..180 deg/s
+  - address: /tussen/{dev}/seq
+    unit: int
+    label: publish counter
+  - address: /tussen/{dev}/recenter
+    unit: event
+    label: stage frame recentered
+  # Gamepad (GamepadSource, publish.sources "gamepad"): any Input System pad.
+  # DualSense: south/east/west/north = cross/circle/square/triangle,
+  # start/select = options/create. Gyro and touchpad aren't published.
+  - address: /tussen/{dev}/pad/active
+    unit: 0/1
+    label: gamepad connected
+  - address: /tussen/{dev}/pad/lx
+    unit: -1..1
+    label: left stick x (+ = right)
+  - address: /tussen/{dev}/pad/ly
+    unit: -1..1
+    label: left stick y (+ = up)
+  - address: /tussen/{dev}/pad/rx
+    unit: -1..1
+    label: right stick x (+ = right)
+  - address: /tussen/{dev}/pad/ry
+    unit: -1..1
+    label: right stick y (+ = up)
+  - address: /tussen/{dev}/pad/n/lx
+    unit: 0..1
+    label: left stick x, centre 0.5
+  - address: /tussen/{dev}/pad/n/ly
+    unit: 0..1
+    label: left stick y, centre 0.5
+  - address: /tussen/{dev}/pad/n/rx
+    unit: 0..1
+    label: right stick x, centre 0.5
+  - address: /tussen/{dev}/pad/n/ry
+    unit: 0..1
+    label: right stick y, centre 0.5
+  - address: /tussen/{dev}/pad/l2
+    unit: 0..1
+    label: left trigger (L2)
+  - address: /tussen/{dev}/pad/l2/press
+    unit: event
+    label: left trigger pressed
+  - address: /tussen/{dev}/pad/r2
+    unit: 0..1
+    label: right trigger (R2)
+  - address: /tussen/{dev}/pad/r2/press
+    unit: event
+    label: right trigger pressed
+  - address: /tussen/{dev}/pad/south
+    unit: 0/1
+    label: south button (DualSense cross, Xbox A)
+  - address: /tussen/{dev}/pad/south/press
+    unit: event
+    label: south button (DualSense cross, Xbox A) pressed
+  - address: /tussen/{dev}/pad/east
+    unit: 0/1
+    label: east button (DualSense circle, Xbox B)
+  - address: /tussen/{dev}/pad/east/press
+    unit: event
+    label: east button (DualSense circle, Xbox B) pressed
+  - address: /tussen/{dev}/pad/west
+    unit: 0/1
+    label: west button (DualSense square, Xbox X)
+  - address: /tussen/{dev}/pad/west/press
+    unit: event
+    label: west button (DualSense square, Xbox X) pressed
+  - address: /tussen/{dev}/pad/north
+    unit: 0/1
+    label: north button (DualSense triangle, Xbox Y)
+  - address: /tussen/{dev}/pad/north/press
+    unit: event
+    label: north button (DualSense triangle, Xbox Y) pressed
+  - address: /tussen/{dev}/pad/l1
+    unit: 0/1
+    label: left shoulder (L1)
+  - address: /tussen/{dev}/pad/l1/press
+    unit: event
+    label: left shoulder (L1) pressed
+  - address: /tussen/{dev}/pad/r1
+    unit: 0/1
+    label: right shoulder (R1)
+  - address: /tussen/{dev}/pad/r1/press
+    unit: event
+    label: right shoulder (R1) pressed
+  - address: /tussen/{dev}/pad/l3
+    unit: 0/1
+    label: left stick click (L3)
+  - address: /tussen/{dev}/pad/l3/press
+    unit: event
+    label: left stick click (L3) pressed
+  - address: /tussen/{dev}/pad/r3
+    unit: 0/1
+    label: right stick click (R3)
+  - address: /tussen/{dev}/pad/r3/press
+    unit: event
+    label: right stick click (R3) pressed
+  - address: /tussen/{dev}/pad/up
+    unit: 0/1
+    label: d-pad up
+  - address: /tussen/{dev}/pad/up/press
+    unit: event
+    label: d-pad up pressed
+  - address: /tussen/{dev}/pad/down
+    unit: 0/1
+    label: d-pad down
+  - address: /tussen/{dev}/pad/down/press
+    unit: event
+    label: d-pad down pressed
+  - address: /tussen/{dev}/pad/left
+    unit: 0/1
+    label: d-pad left
+  - address: /tussen/{dev}/pad/left/press
+    unit: event
+    label: d-pad left pressed
+  - address: /tussen/{dev}/pad/right
+    unit: 0/1
+    label: d-pad right
+  - address: /tussen/{dev}/pad/right/press
+    unit: event
+    label: d-pad right pressed
+  - address: /tussen/{dev}/pad/start
+    unit: 0/1
+    label: start (DualSense options)
+  - address: /tussen/{dev}/pad/start/press
+    unit: event
+    label: start (DualSense options) pressed
+  - address: /tussen/{dev}/pad/select
+    unit: 0/1
+    label: select (DualSense create)
+  - address: /tussen/{dev}/pad/select/press
+    unit: event
+    label: select (DualSense create) pressed
+  # Gamepad on the hub laptop (tussen-hub [pad], gilrs): the same schema
+  # under /tussen/pad/… — a controller plugged into the hub machine, no
+  # device app involved.
+  # DualSense: south/east/west/north = cross/circle/square/triangle,
+  # start/select = options/create. Gyro and touchpad aren't published.
+  - address: /tussen/pad/active
+    unit: 0/1
+    label: gamepad connected
+  - address: /tussen/pad/lx
+    unit: -1..1
+    label: left stick x (+ = right)
+  - address: /tussen/pad/ly
+    unit: -1..1
+    label: left stick y (+ = up)
+  - address: /tussen/pad/rx
+    unit: -1..1
+    label: right stick x (+ = right)
+  - address: /tussen/pad/ry
+    unit: -1..1
+    label: right stick y (+ = up)
+  - address: /tussen/pad/n/lx
+    unit: 0..1
+    label: left stick x, centre 0.5
+  - address: /tussen/pad/n/ly
+    unit: 0..1
+    label: left stick y, centre 0.5
+  - address: /tussen/pad/n/rx
+    unit: 0..1
+    label: right stick x, centre 0.5
+  - address: /tussen/pad/n/ry
+    unit: 0..1
+    label: right stick y, centre 0.5
+  - address: /tussen/pad/l2
+    unit: 0..1
+    label: left trigger (L2)
+  - address: /tussen/pad/l2/press
+    unit: event
+    label: left trigger pressed
+  - address: /tussen/pad/r2
+    unit: 0..1
+    label: right trigger (R2)
+  - address: /tussen/pad/r2/press
+    unit: event
+    label: right trigger pressed
+  - address: /tussen/pad/south
+    unit: 0/1
+    label: south button (DualSense cross, Xbox A)
+  - address: /tussen/pad/south/press
+    unit: event
+    label: south button (DualSense cross, Xbox A) pressed
+  - address: /tussen/pad/east
+    unit: 0/1
+    label: east button (DualSense circle, Xbox B)
+  - address: /tussen/pad/east/press
+    unit: event
+    label: east button (DualSense circle, Xbox B) pressed
+  - address: /tussen/pad/west
+    unit: 0/1
+    label: west button (DualSense square, Xbox X)
+  - address: /tussen/pad/west/press
+    unit: event
+    label: west button (DualSense square, Xbox X) pressed
+  - address: /tussen/pad/north
+    unit: 0/1
+    label: north button (DualSense triangle, Xbox Y)
+  - address: /tussen/pad/north/press
+    unit: event
+    label: north button (DualSense triangle, Xbox Y) pressed
+  - address: /tussen/pad/l1
+    unit: 0/1
+    label: left shoulder (L1)
+  - address: /tussen/pad/l1/press
+    unit: event
+    label: left shoulder (L1) pressed
+  - address: /tussen/pad/r1
+    unit: 0/1
+    label: right shoulder (R1)
+  - address: /tussen/pad/r1/press
+    unit: event
+    label: right shoulder (R1) pressed
+  - address: /tussen/pad/l3
+    unit: 0/1
+    label: left stick click (L3)
+  - address: /tussen/pad/l3/press
+    unit: event
+    label: left stick click (L3) pressed
+  - address: /tussen/pad/r3
+    unit: 0/1
+    label: right stick click (R3)
+  - address: /tussen/pad/r3/press
+    unit: event
+    label: right stick click (R3) pressed
+  - address: /tussen/pad/up
+    unit: 0/1
+    label: d-pad up
+  - address: /tussen/pad/up/press
+    unit: event
+    label: d-pad up pressed
+  - address: /tussen/pad/down
+    unit: 0/1
+    label: d-pad down
+  - address: /tussen/pad/down/press
+    unit: event
+    label: d-pad down pressed
+  - address: /tussen/pad/left
+    unit: 0/1
+    label: d-pad left
+  - address: /tussen/pad/left/press
+    unit: event
+    label: d-pad left pressed
+  - address: /tussen/pad/right
+    unit: 0/1
+    label: d-pad right
+  - address: /tussen/pad/right/press
+    unit: event
+    label: d-pad right pressed
+  - address: /tussen/pad/start
+    unit: 0/1
+    label: start (DualSense options)
+  - address: /tussen/pad/start/press
+    unit: event
+    label: start (DualSense options) pressed
+  - address: /tussen/pad/select
+    unit: 0/1
+    label: select (DualSense create)
+  - address: /tussen/pad/select/press
+    unit: event
+    label: select (DualSense create) pressed
+  # MIDI (from the hub). Poly aftertouch per held note.
+  - address: /tussen/midi/note/{n}/pressure
+    unit: 0..1
+    label: poly aftertouch on note n (0 on release)

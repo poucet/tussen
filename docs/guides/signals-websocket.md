@@ -1,0 +1,106 @@
+# The signals websocket
+
+How an external page or script reads the hub's live signals — OSC, MIDI, the
+beat — over the console's websocket. A browser shader sketchpad, a VJ tool or
+a monitoring script consumes this to drive itself from the same signals every
+other subscriber sees. The field names below are pinned by
+`hub/src/console/protocol.rs` (the source of truth).
+
+## Connect
+
+```
+ws://127.0.0.1:<console port>/ws        # port: hub.toml [console], default 9098
+```
+
+The console binds 127.0.0.1 only, so the consumer runs on the hub laptop.
+Who may connect, by the browser's `Origin`:
+
+| Origin | Access |
+|---|---|
+| the console page itself · none (scripts, `file://`) | full: commands + feed |
+| any other loopback origin (`http://127.0.0.1:8787`, `http://localhost:5173`, …) | **read-only**: `watch` + every event |
+| anything non-loopback | refused (403) |
+
+`?readonly=1` on the URL opts any connection down to read-only — use it from
+scripts so a feed consumer can never disturb a live performance. Read-only
+connections may send `watch` and nothing else; commands are ignored (hub log
+says so). Multiple simultaneous clients are fine; each gets the full feed and
+slow consumers are dropped frames rather than allowed to stall the hub.
+
+## First frame: `hello`
+
+Sent on connect, and re-sent to everyone after any sync/follow/remap change.
+
+```json
+{ "t": "hello",
+  "sync":  { "signal_delay_ms": 0, "td_round_trip_ms": 0 },
+  "dests": [ { "name": "engine", "kind": "engine" },
+             { "name": "quest", "kind": "device", "follow": "td" } ],
+  "remaps": [ { "id": 3, "dest": "td", "from": "/a/*", "to": "/b", "range": [0, 2], "keep": true } ],
+  "sample_rate": 48000,
+  "osc":   { "port": 9000, "ips": ["192.0.2.2"], "hostname": "hub.local" } }
+```
+
+`osc` is where OSC *senders* should aim (the console's copy button);
+`hostname` is absent when unknown, `ips` empty on a routeless machine.
+`td_round_trip_ms` is the second sync delay (see the README's sync section);
+a `dest`'s `follow` says which of the two delays that device gets.
+
+## Subscribe: `watch`
+
+The only message a read-only client sends. OSC events arrive **only for
+watched addresses**; each `watch` replaces the previous list.
+
+```json
+{ "t": "watch", "addrs": ["*"] }                          // everything
+{ "t": "watch", "addrs": ["/tussen/pad/", "/djay/"] }     // exact addresses — no prefix match, see below
+```
+
+`"*"` watches every address. Anything else matches the **full address
+exactly**, so for a feed consumer `["*"]` is the right call; filter
+client-side.
+
+## The feed
+
+One JSON object per frame; `ts` is the hub clock in **microseconds** (one
+epoch for all frames — deltas are meaningful, the absolute value is not).
+
+| frame | shape | when |
+|---|---|---|
+| `osc` | `{"t":"osc","ts":…,"addr":"/ext/x","v":0.5,"src":"127.0.0.1:5000"}` | per message, as routed — watched addresses only; hub-made signals (`/tussen/clock/…`, `/tussen/pad/…`) carry `"src":"hub"` |
+| `midi` | `{"t":"midi","ts":…,"addr":"/tussen/midi/cc/74","v":0.5}` | per MIDI-derived signal, always (no watch needed) |
+| `addrs` | `{"t":"addrs","list":[{"addr":"/ext/x","last_ts":…,"rate":2.5,"v":0.5,"min":0,"max":1,"count":12,"dir":"in"}]}` | ~2 Hz; every address since hub start, sorted, permanent; `dir` ∈ `in`/`out`/`both` |
+| `link` | `{"t":"link","ts":…,"beat":2.5,"bpm":120,"quantum":4,"playing":true,"peers":1}` | on Link status change |
+| `audio` | `{"t":"audio","ts":…,"blocks":[[min,max,rms],…]}` | ~30 Hz; per-RTP-packet level summaries — the console's waveform, **not** audio data |
+| `dests` | `{"t":"dests","dests":[…]}` | when a device registers or leaves |
+| `saved` | `{"t":"saved","ok":true,"path":"…"}` | reply to the console's save |
+
+**Rates.** `watch "*"` is per-message: with devices publishing at 60 Hz plus
+MIDI, expect hundreds of frames a second — batch your reads per animation
+frame rather than doing work per message.
+
+**The beat** arrives two ways: the `link` frame above, and the hub's own
+clock signals as ordinary OSC — `/tussen/clock/bpm`, `/beat`, `/phase`,
+`/running`, `/onbeat` (docs/guides/osc-signals.md) — covered by `watch "*"`.
+
+**Audio is not on the websocket.** The `audio` frames are 3-number level
+summaries for drawing a waveform. A browser page that wants the actual music
+captures it itself: `getUserMedia` on the same loopback/capture device the hub
+reads (`[audio] device`) — the standard Web Audio path, and the same audio
+every device hears.
+
+## Minimal consumer
+
+```js
+const ws = new WebSocket("ws://127.0.0.1:9098/ws?readonly=1");
+const sig = {};                              // address → latest value
+ws.onopen = () => ws.send(JSON.stringify({ t: "watch", addrs: ["*"] }));
+ws.onmessage = (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.t === "osc" || m.t === "midi") sig[m.addr] = m.v;   // read per frame, not per message
+  if (m.t === "link") sig["/tussen/clock/bpm"] = m.bpm;
+};
+```
+
+Smoke it live (two simultaneous subscribers against a running hub; skips
+when none runs): `node tools/console-test/smoke.js`.

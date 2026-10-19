@@ -1,0 +1,47 @@
+[package]
+name = "tussen-hub"
+description = "An OSC/MIDI/audio hub for live performance: subscription routing, Ableton Link, and two sync delays that line signals up with the music"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "tussen_hub"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tussen-hub"
+path = "src/main.rs"
+
+[dependencies]
+simply-osc = { git = "https://github.com/poucet/music-rs.git" }
+simply-midi = { git = "https://github.com/poucet/music-rs.git", features = ["device"] }
+# Ableton Link: the hub joins the session and leads it (tempo, start/stop).
+simply-link = { git = "https://github.com/poucet/music-rs.git" }
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+# Audio capture: any device by name — inputs, or a CoreAudio process tap of
+# an output (macOS 14.2+), resampled to [audio] sample_rate. Shared with
+# audiowatch, which owns it.
+simply-audio-capture = { git = "https://github.com/poucet/audiowatch.git" }
+# Wait-free SPSC ring for the capture callback → sender thread hand-off
+rtrb = "0.3"
+# Hub console. tungstenite is the whole WebSocket stack with no
+# async runtime: the console runs on plain threads like the rest of the hub,
+# and its HTTP side is two GET routes on loopback, parsed with httparse
+# (already a tungstenite dependency) rather than pulling in a server crate.
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+httparse = "1"
+serde_json = "1"
+# Save writes [sync]/[[remap]] back into the config keeping its comments.
+toml_edit = "0.22"
+gilrs = "0.11.2"
+
+# Ctrl-C/SIGTERM destroys a live output tap before the hub exits.
+[target.'cfg(target_os = "macos")'.dependencies]
+signal-hook = "0.3"

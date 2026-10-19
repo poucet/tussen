@@ -1,0 +1,9 @@
+.DS_Store
+
+# Build output
+hub/target/
+tools/*/target/
+.vscode/
+
+# tools/console-test/browser.js renders its screenshots here
+.screenshots/

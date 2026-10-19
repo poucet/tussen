@@ -1,0 +1,77 @@
+# hub.toml — the tussen-hub config. The shipped file is a working example:
+# everything on one machine, all destinations local. Point the hosts at real
+# machines and name your capture device, and it runs a venue.
+# Devices (anything that sends /tussen/hub/hello) announce themselves: no entry.
+
+[osc]
+listen_port = 9000
+max_packet = 1200
+device_timeout_ms = 3000
+
+# A destination is anything the hub forwards OSC to. `name = "engine"` is the
+# music software: it is never delayed (it makes the sound everything else is
+# aligned TO). External tools send to the hub under their own prefix: /ext/
+# for tools whose addresses you choose, /djay/ for djay Pro's fixed scheme. A
+# new fixed-scheme tool means adding its prefix to these subscribe lists.
+[[dest]]
+name = "engine"
+host = "127.0.0.1"
+# host = "music-laptop.local"
+port = 3928                  # your music software's OSC input port
+subscribe = ["/tussen/", "/ext/", "/djay/"]
+exclude = ["/tussen/midi/", "/tussen/clock/", "/tussen/hub/"]
+
+# `name = "td"` is a visuals destination: its signals wait for the returning
+# music ([sync] signal_delay_ms), and it can take the hub's audio as RTP
+# (rtp_port). Works for TouchDesigner, or anything with an OSC input and a
+# way to play an RTP L16 stream (e.g. GStreamer into a loopback device).
+[[dest]]
+name = "td"
+host = "127.0.0.1"
+# host = "visuals-laptop.local"
+port = 9001
+subscribe = ["/tussen/", "/ext/", "/djay/"]
+exclude = ["/tussen/hub/"]
+rtp_port = 5006
+
+# The audio the hub streams to the visuals destination and the devices. Any
+# name `tussen-hub list` prints: a device with inputs is read, an output-only
+# one is tapped. "" = this machine's default output.
+[audio]
+device = ""
+# device = "<a loopback device carrying the mix, from `tussen-hub list`>"
+sample_rate = 48000
+channels = 2
+packet_frames = 256
+
+# MIDI controllers on this machine → /tussen/midi/… ("*" = every port).
+[midi]
+inputs = ["*"]
+refresh_ms = 500
+
+# A game controller plugged into THIS machine (e.g. a DualSense, USB or
+# Bluetooth) → /tussen/pad/… — no device app involved. A controller on a
+# performance device still publishes /tussen/<dev>/pad/… (same schema).
+[pad]
+enabled = true
+controllers = ["*"]         # name filters, substring match; "*" = any
+refresh_ms = 500
+
+# The hub founds an Ableton Link session at this tempo when it hears none,
+# then follows: a player's tempo (a DJ going on Link) wins; the console can
+# set one too.
+[link]
+tempo = 120
+quantum = 4
+
+# The two sync points and remap rules: set them in the console and press
+# Save; it writes them here, keeping these comments. Solo on one machine the
+# mix needs no delay, so both start at 0; with a real room, set them on the
+# console (README, "The console"). A device whose round trip is too long gets
+# `[sync.device.<name>]` `follow = "music"` from its switch.
+[sync]
+signal_delay_ms = 0          # MIDI + OSC wait this long for the returning mix (TD + devices)
+td_round_trip_ms = 0         # devices wait this much more for TD's NDI (their audio too)
+
+[console]
+port = 9098                  # http://127.0.0.1:9098 (this machine only)

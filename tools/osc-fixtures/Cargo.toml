@@ -1,0 +1,9 @@
+[package]
+name = "osc-fixtures"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+simply-osc = { git = "https://github.com/poucet/music-rs.git" }
