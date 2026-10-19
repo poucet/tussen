@@ -72,10 +72,15 @@ All of these except 9000 and 9098 are per-destination settings in `hub.toml`.
    or `audio: capturing input …`), and the stats line reads
    `audio=187.5pkt/s` once anyone is listening. `tussen-hub listen --name me
    --audio` registers a throwaway device and prints the stream's peak level.
-6. **Link.** The hub founds an Ableton Link session at `[link] tempo` when
-   it hears none and follows after: a player changing tempo (the DJ) wins,
-   and the hub never pushes its tempo back. The console can set tempo and
-   start/stop for every peer.
+6. **Link.** The hub never founds an Ableton Link session by itself. It
+   starts *waiting* (the console's Link field says `Link: waiting`), with a
+   beat of its own at `[link] tempo`, and joins the first session it hears
+   at that session's tempo — a DJ who switches Link on later keeps their
+   tempo. When everyone else has left a session it joined, it waits again.
+   If nobody else will join, press **start session** in the console: the
+   hub founds one at the current tempo and stays in it until it stops. In
+   a session the console sets tempo and start/stop for every peer; click
+   the peer count to see who is connected.
 7. **MIDI controllers** on this laptop publish `/tussen/midi/…`
    (`[midi] inputs = ["*"]` takes every port). A Novation Launchpad X sends
    per-pad pressure only in *Polyphonic Aftertouch* mode (Settings ▸ the

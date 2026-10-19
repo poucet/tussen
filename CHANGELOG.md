@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+#### Ableton Link: the hub waits for a session instead of founding one · 2026-10-19 20:09 · qvpsqvxx
+
+- **The hub no longer starts a Link session by itself.** Before, it founded
+  one at `[link] tempo` after a second alone, so a DJ who switched Link on
+  later joined the hub's (older) session and had their track slowed to the
+  hub's 120. Now the hub starts *waiting*: it listens, announces nothing,
+  and joins the first session it hears **at that session's tempo** — the
+  DJ's tempo and beat never move.
+- While it waits the hub keeps a beat of its own at `[link] tempo`, so
+  `/tussen/clock/…` never stops; the console's tempo and start/stop drive
+  it. Joining a session moves the beat onto the session's.
+- **Start session** in the console (next to the Link field, shown while
+  waiting) founds a session now at the current tempo, carrying the beat on
+  — for when nobody else will join.
+- The rule for going back: when everyone else has left a session the hub
+  *joined*, it waits again. A session started from the console stays until
+  the hub stops.
+- The console's Link field says `Link: waiting` or the peer count; its
+  dropdown says which of the three the hub is in. The `link` frame gains
+  `mode`. Needs `simply-link` with `found`/`leave` (music-rs, unreleased).
+
 #### Console: click the Link peer count to see who is connected · 2026-10-19 20:00 · prsmntlt
 
 - **The "Link N peers" field at the top of the console now opens a list**

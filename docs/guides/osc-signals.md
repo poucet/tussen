@@ -65,7 +65,7 @@ hub also resends its full pad state every 500 ms (self-heal), and sends
 
 **Beat: Ableton Link, from the hub**
 * `/tussen/clock/bpm` - tempo, beats per minute
-* `/tussen/clock/beat` - Link session beat (same bars as every Link peer)
+* `/tussen/clock/beat` - Link session beat (same bars as every Link peer); while the hub waits for a session, its own beat at `[link] tempo`
 * `/tussen/clock/phase` - position within the beat, 0..1
 * `/tussen/clock/running` - 1 while the session is playing
 * `/tussen/clock/onbeat` - event on each beat (beat index, int)

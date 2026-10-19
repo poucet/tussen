@@ -3,7 +3,8 @@
 // no uncaught errors, the UI builds from the mock hub, the signal delay (sync
 // point 1) moves the markers onto the kicks, the round trip (sync point 2) and
 // the follow switch round-trip, watch/rule/save round-trip, the Link peer
-// dropdown (open, outside click, Escape, empty state). Node stdlib only (needs
+// dropdown (open, outside click, Escape, empty state), waiting → Start
+// session and waiting → a session appears. Node stdlib only (needs
 // Node >= 22 for the global WebSocket). Skips (exit 0) when Chrome is absent.
 //   node tools/console-test/browser.js            # screenshot -> <repo>/.screenshots/progress/<date>-console-test/
 //   SCREENSHOT_DIR=… node browser.js              # a lane labels its own directory
@@ -233,19 +234,40 @@ let ch = null;
   await sleep(400);
   ok(await ev("!document.body.classList.contains('tab-osc') && document.querySelector('#oscpage').offsetParent === null"), 'sync tab comes back');
 
-  // ---- no peers: the empty state ----------------------------------------------
+  // ---- waiting for a Link session → Start session ----------------------------
+  ok(await ev("document.querySelector('#linkstart').hidden"), 'in a session: no Start session button');
   await cdp('Page.navigate', { url: page + '&peers=0' });
   await sleep(1500);
-  ok(/Link 0 peers\b/.test(await ev("document.querySelector('#linkst').textContent")), 'no peers: the count says 0');
+  ok(/^Link: waiting\b/.test(await ev("document.querySelector('#linkst').textContent")), 'no peers: the field says waiting');
+  ok(!(await ev("document.querySelector('#linkstart').hidden")), 'waiting: Start session offered');
+  ok(await ev("document.querySelector('#bpm').value") === '120' && !(await ev("document.querySelector('#bpm').disabled")), 'waiting: own beat at 120, tempo editable');
   await ev("document.querySelector('#linkst').click()");
   await sleep(300);
-  ok(await ev("document.querySelector('#peerdrop .empty') && document.querySelector('#peerdrop').textContent") === 'no Link peers', 'empty state: no Link peers');
-  const shotE = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: 300, scale: 1 } });
-  fs.writeFileSync(path.join(shotDir, 'console-link-peers-empty.png'), Buffer.from(shotE.result.data, 'base64'));
+  ok(await ev("document.querySelector('#peerdrop .empty') && document.querySelector('#peerdrop .empty').textContent") === 'no Link peers', 'empty state: no Link peers');
+  ok(/joins the first one it hears/.test(await ev("document.querySelector('#peerdrop .mode').textContent")), 'the dropdown says what waiting means');
+  const shotW = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: 300, scale: 1 } });
+  fs.writeFileSync(path.join(shotDir, 'console-link-waiting.png'), Buffer.from(shotW.result.data, 'base64'));
+  await ev("{ const n = document.querySelector('#bpm'); n.value = '104'; n.dispatchEvent(new Event('change')); }");
+  await sleep(700);
+  await ev("document.querySelector('#linkstart').click()");
+  await sleep(700);
+  ok(/^Link 0 peers\b/.test(await ev("document.querySelector('#linkst').textContent")), 'started: the field shows the peer count', await ev("document.querySelector('#linkst').textContent"));
+  ok(await ev("document.querySelector('#linkstart').hidden"), 'started: the button goes');
+  ok(await ev("document.querySelector('#bpm').value") === '104', 'started at the tempo set while waiting');
+  ok(/stays until the hub stops/.test(await ev("document.querySelector('#peerdrop .mode').textContent")), 'the open dropdown follows: started');
+  const shotS = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: 300, scale: 1 } });
+  fs.writeFileSync(path.join(shotDir, 'console-link-started.png'), Buffer.from(shotS.result.data, 'base64'));
+  // ---- waiting → a session appears: joined, at its tempo -----------------------
+  await cdp('Page.navigate', { url: page + '&peers=0&join=2500' });
+  await sleep(1200);
+  ok(/^Link: waiting\b/.test(await ev("document.querySelector('#linkst').textContent")), 'waiting before the peers come');
+  await sleep(2300);
+  ok(/^Link 2 peers\b/.test(await ev("document.querySelector('#linkst').textContent")), 'a session appears: joined, its peers counted');
+  ok(await ev("document.querySelector('#bpm').value") === '126' && await ev("document.querySelector('#linkstart').hidden"), 'at the session\'s 126; no Start session');
 
   ok(errors.length === 0, 'no uncaught errors / console errors', errors);
 
-  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-peers-empty.png');
+  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-waiting.png, console-link-started.png');
   console.log((fail ? 'FAILED' : 'ok') + ': ' + pass + ' passed, ' + fail + ' failed');
   clearTimeout(killer); ws.close(); ch.kill('SIGKILL');
   process.exit(fail ? 1 : 0);

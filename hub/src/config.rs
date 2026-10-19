@@ -35,7 +35,7 @@ pub struct Config {
     /// The hub console's web server.
     #[serde(default)]
     pub console: ConsoleConfig,
-    /// Ableton Link: founded when alone, followed after.
+    /// Ableton Link: waited for and joined, or started from the console.
     #[serde(default)]
     pub link: crate::link::LinkConfig,
 }

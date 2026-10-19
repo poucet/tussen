@@ -171,7 +171,7 @@ const HUB_SPEC = {
   osc: ['ts', 'addr', 'v', 'src'],
   addrs: ['list'],
   saved: ['ok'],
-  link: ['ts', 'beat', 'bpm', 'quantum', 'playing', 'peers', 'peer_list'],
+  link: ['ts', 'beat', 'bpm', 'quantum', 'playing', 'mode', 'peers', 'peer_list'],
 };
 const run = runMock({}, 25, (hub, el) => {
   if (el === 15e3) hub.onMessage(L.msg.watch(['/ext/tablet/fader1', '/tussen/quest/controller/trigger']));
@@ -195,6 +195,7 @@ for (const m of run.msgs) {
   if (m.t === 'hello') for (const r of m.remaps) { for (const k of ['id', 'dest', 'from', 'to', 'keep']) if (!(k in r)) shapeErr = 'remap missing ' + k; if ('range' in r && r.range.length !== 2) shapeErr = 'remap range'; }
   if (m.t === 'audio') for (const b of m.blocks) if (b.length !== 3 || !(b[0] <= b[1]) || b[2] < 0) shapeErr = 'audio block ' + JSON.stringify(b);
   if (m.t === 'link' && !(['ts', 'beat', 'bpm', 'quantum'].every(k => typeof m[k] === 'number') && typeof m.playing === 'boolean' && Number.isInteger(m.peers))) shapeErr = 'link types ' + JSON.stringify(m);
+  if (m.t === 'link' && !L.LINK_MODES.includes(m.mode)) shapeErr = 'link mode must be waiting|joined|started: ' + m.mode;
   if (m.t === 'link') for (const p of m.peer_list) {
     if (!(typeof p.node === 'string' && typeof p.session === 'string' && typeof p.in_session === 'boolean' && typeof p.local === 'boolean' && typeof p.bpm === 'number' && Number.isInteger(p.age_ms))) shapeErr = 'link peer types ' + JSON.stringify(p);
     for (const k of ['host', 'hostname', 'playing']) if (k in p && p[k] === null) shapeErr = 'link peer ' + k + ' must be absent, not null';
@@ -374,6 +375,36 @@ section('Link');
     const r = runMock({ peers: k }, 1), last = r.msgs.filter(m => m.t === 'link').pop();
     ok(last.peer_list.length === k && last.peers === want, 'mock peers=' + k, last);
   }
+}
+{ // modes: waiting → Start session; waiting → a peer joins
+  ok(run.msgs.filter(m => m.t === 'link').every(m => m.mode === 'joined'), 'mock with peers: joined');
+  ok(L.linkLabel({ mode: 'joined', peers: 2 }) === 'Link 2 peers' && L.linkLabel({ mode: 'started', peers: 1 }) === 'Link 1 peer' && L.linkLabel({ mode: 'waiting', peers: 0 }) === 'Link: waiting' && L.linkLabel(null) === 'no Link', 'linkLabel');
+  ok(/joins the first one it hears/.test(L.linkModeNote({ mode: 'waiting' })) && /stays until the hub stops/.test(L.linkModeNote({ mode: 'started' })) && /waits again/.test(L.linkModeNote({ mode: 'joined' })), 'linkModeNote says the rule');
+  const S9 = L.createState();
+  L.applyMessage(S9, { t: 'link', ts: 1, beat: 0, bpm: 120, quantum: 4, playing: true, peers: 1 }, 0);
+  ok(S9.links[0].mode === 'joined', 'a link without mode reads as joined (older hubs)');
+  ok(JSON.stringify(L.msg.linkStart()) === '{"t":"link_start"}', 'msg.linkStart');
+  // waiting: a beat of its own at the configured tempo; the console drives it; Start founds
+  const w = runMock({ peers: 0 }, 3, (hub, el) => {
+    if (el === 0.9e6) hub.onMessage(L.msg.setTempo(100));
+    if (el === 2.1e6) hub.onMessage(L.msg.linkStart());
+    if (el === 2.4e6) hub.onMessage(L.msg.linkStart());   // already started: ignored
+  });
+  const wl = w.msgs.filter(m => m.t === 'link');
+  const before = wl.filter(m => m.mode === 'waiting'), after = wl.filter(m => m.mode === 'started');
+  ok(before.length >= 7 && before[0].peers === 0 && before[0].peer_list.length === 0 && before[0].bpm === 120, 'waiting: link frames flow with a beat of its own, no peers', before[0]);
+  ok(before.some(m => m.bpm === 100), 'waiting: set_tempo moves the own beat');
+  ok(after.length >= 3 && after.every(m => m.bpm === 100 && m.peers === 0), 'link_start: started, at the waiting tempo', after[0]);
+  const lastWait = before[before.length - 1], firstStart = after[0];
+  ok(Math.abs(lastWait.beat + (firstStart.ts - lastWait.ts) * 100 / 60e6 - firstStart.beat) < 1e-6, 'starting keeps the beat continuous');
+  ok(w.hub.errors.length === 0, 'mock saw no protocol errors (link_start)', w.hub.errors);
+  // waiting → peers appear at 126: joined, at their tempo
+  const j = runMock({ peers: 0, joinMs: 1500 }, 3);
+  const jl = j.msgs.filter(m => m.t === 'link'), firstJoined = jl.findIndex(m => m.mode === 'joined');
+  ok(firstJoined > 0 && jl.slice(0, firstJoined).every(m => m.mode === 'waiting' && m.bpm === 120), 'waiting at 120 until a peer appears');
+  ok(jl.slice(firstJoined).every(m => m.mode === 'joined' && m.bpm === 126 && m.peers === 2 && m.peer_list.length === 3), 'then joined at the peers\' 126', jl[firstJoined]);
+  const jr = runMock({ peers: 0, joinMs: 500 }, 2, (hub, el) => { if (el === 1.5e6) hub.onMessage(L.msg.linkStart()); });
+  ok(jr.msgs.filter(m => m.t === 'link').pop().mode === 'joined', 'Start session once joined: ignored');
 }
 { // set_tempo / set_playing through the mock: reported bpm/playing follow, beat line stays continuous
   const r = runMock({}, 3, (hub, el) => { if (el === 1.5e6) { hub.onMessage(L.msg.setTempo(90)); hub.onMessage(L.msg.setPlaying(false)); } });

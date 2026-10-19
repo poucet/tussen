@@ -79,7 +79,7 @@ pub fn addrs(list: &[AddrInfo]) -> String {
 pub fn link(s: &crate::link::LinkStatus) -> String {
     json!({
         "t": "link", "ts": s.ts, "beat": s.beat, "bpm": s.bpm,
-        "quantum": s.quantum, "playing": s.playing, "peers": s.peers,
+        "quantum": s.quantum, "playing": s.playing, "mode": s.mode, "peers": s.peers,
         "peer_list": s.peer_list,
     })
     .to_string()
@@ -104,7 +104,9 @@ pub enum Request {
     Upsert(RemapRule),
     Delete(u64),
     /// `set_tempo` / `set_playing`: proposed to the Link session once,
-    /// when the human acts (the hub otherwise follows).
+    /// when the human acts (the hub otherwise follows) — or, while the hub
+    /// waits for a session, applied to its own beat. `link_start`: start a
+    /// session now, if waiting.
     Link(crate::link::LinkCmd),
     Save,
 }
@@ -188,6 +190,7 @@ pub fn parse_request(text: &str) -> Result<Request, String> {
             Some(bpm) if bpm.is_finite() => Ok(Request::Link(crate::link::LinkCmd::Tempo(bpm))),
             _ => Err("set_tempo needs a number bpm".into()),
         },
+        "link_start" => Ok(Request::Link(crate::link::LinkCmd::Start)),
         "set_playing" => match v.get("playing").and_then(Value::as_bool) {
             Some(p) => Ok(Request::Link(crate::link::LinkCmd::Playing(p))),
             None => Err("set_playing needs a boolean playing".into()),
@@ -245,6 +248,7 @@ mod tests {
             bpm: 120.0,
             quantum: 4.0,
             playing: true,
+            mode: crate::link::Mode::Joined,
             peers: 1,
             peer_list: vec![
                 crate::link::PeerRow {
@@ -274,7 +278,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             k,
-            json!({"t":"link","ts":5,"beat":2.5,"bpm":120.0,"quantum":4.0,"playing":true,"peers":1,
+            json!({"t":"link","ts":5,"beat":2.5,"bpm":120.0,"quantum":4.0,"playing":true,"mode":"joined","peers":1,
                    "peer_list":[
                      {"node":"abcdefgh","session":"abcdefgh","in_session":true,"host":"192.0.2.21",
                       "hostname":"laptop.local","local":false,"bpm":120.0,"playing":true,"age_ms":120},
@@ -340,6 +344,7 @@ mod tests {
             parse_request(r#"{"t":"set_playing","playing":false}"#).unwrap(),
             Request::Link(LinkCmd::Playing(false))
         );
+        assert_eq!(parse_request(r#"{"t":"link_start"}"#).unwrap(), Request::Link(LinkCmd::Start));
         assert!(parse_request(r#"{"t":"set_tempo","bpm":"fast"}"#).is_err());
         assert!(parse_request(r#"{"t":"set_playing"}"#).is_err());
         assert!(parse_request(r#"{"t":"nope"}"#).is_err());

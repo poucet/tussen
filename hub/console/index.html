@@ -63,7 +63,8 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
 #linkgrp{position:relative}
 #linkst{cursor:pointer;border-bottom:1px dotted var(--dim)}#linkst:hover{color:#fff}
 #peerdrop{display:none;position:absolute;top:calc(100% + 5px);left:0;z-index:5;min-width:520px;background:var(--pn);border:1px solid var(--ln);box-shadow:0 6px 18px #000a;padding:6px 8px}
-#peerdrop.open{display:block}#peerdrop.none{min-width:0;white-space:nowrap}
+#peerdrop.open{display:block}#peerdrop .mode{max-width:560px;white-space:normal;margin-bottom:4px}
+#linkstart{color:#fff;background:#6b4fbb;border-color:#8a6fd9}
 #peerdrop td.in{color:var(--ok)}#peerdrop td.v{text-align:right;font-variant-numeric:tabular-nums}
 #peerdrop .empty{color:var(--dim);padding:6px 0}
 </style>
@@ -75,7 +76,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
   <button id="pause" title="Space">⏸ pause</button>
   <span>window <input id="win" type="number" min="50" max="10000" step="10" value="2000"> ms</span>
   <span>gain <input id="gain" type="number" min="0.25" max="64" step="0.25" value="1"></span>
-  <span id="linkgrp" title="Ableton Link session (the hub leads it); the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="who is in the Link session — click for the list">no Link</span><div id="peerdrop" role="dialog" aria-label="Link peers"></div> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button></span>
+  <span id="linkgrp" title="Ableton Link: the hub joins the session it hears, or waits with a beat of its own; the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="who is in the Link session — click for the list">no Link</span><div id="peerdrop" role="dialog" aria-label="Link peers"></div> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button> <button id="linkstart" hidden title="found a Link session now, at this tempo — for when nobody else will join">⊕ start session</button></span>
   <span id="readout" class="dim">—</span>
   <span id="endpoint" title="where OSC senders (djay Pro, tablets, scripts) send — any address under its own prefix, UDP">OSC in <code id="eptext">…</code><button id="epcopy" title="copy ip:port">⧉ copy</button></span>
   <span style="flex:1"></span>
@@ -144,6 +145,7 @@ const BLOCK_FRAMES = 256;
 const MAX_DELAY_MS = 5000;
 const FOLLOWS = ['td', 'music'];
 const TEMPO_MIN = 20, TEMPO_MAX = 999, LINK_KEEP = 200, LINK_STALE_MS = 2000;
+const LINK_MODES = ['waiting', 'joined', 'started'];
 const KEEP_US = 30e6;
 const HISTORY_CAP = 5000;           // live-history ring (messages kept for the osc tab)
 const HEAT_MS = 1500;               // how long a wiggled address stays highlighted               // history kept for panning while paused
@@ -343,6 +345,19 @@ function peerRows(peers) {
     node: p.node, inSession: p.in_session,
   }));
 }
+// The Link field's text: waiting, or the peer count in a session.
+function linkLabel(l) {
+  if (!l) return 'no Link';
+  if (l.mode === 'waiting') return 'Link: waiting';
+  return 'Link ' + l.peers + ' peer' + (l.peers === 1 ? '' : 's');
+}
+// The dropdown's first line: where the hub is with Link and what happens next.
+function linkModeNote(l) {
+  if (!l) return 'no Link';
+  if (l.mode === 'waiting') return 'Waiting for a Link session: the hub joins the first one it hears, at its tempo. Until then the beat is the hub\'s own. Start session founds one now at this tempo.';
+  if (l.mode === 'started') return 'In the session started here: it stays until the hub stops.';
+  return 'In a joined session: when everyone else leaves it, the hub waits again.';
+}
 function peerSummary(peers) {
   const n = peers.filter(p => p.in_session).length, o = peers.length - n;
   return n + ' in the hub\'s session' + (o ? ', ' + o + ' in another' : '');
@@ -402,7 +417,8 @@ function applyMessage(s, m, localMs) {
       return 'addrs';
     }
     case 'link': {
-      const l = { ts: Number(m.ts), beat: Number(m.beat), bpm: Number(m.bpm), quantum: Number(m.quantum) || 4, playing: !!m.playing, peers: Number(m.peers) || 0 };
+      const l = { ts: Number(m.ts), beat: Number(m.beat), bpm: Number(m.bpm), quantum: Number(m.quantum) || 4, playing: !!m.playing, peers: Number(m.peers) || 0,
+        mode: LINK_MODES.includes(m.mode) ? m.mode : 'joined' };
       while (s.links.length && s.links[s.links.length - 1].ts >= l.ts) s.links.pop();   // a re-sent instant supersedes
       s.links.push(l);
       if (s.links.length > LINK_KEEP) s.links.splice(0, s.links.length - LINK_KEEP);
@@ -461,6 +477,7 @@ const msg = {
   save: () => ({ t: 'save' }),
   setTempo: (bpm) => ({ t: 'set_tempo', bpm: clampTempo(bpm) }),
   setPlaying: (p) => ({ t: 'set_playing', playing: !!p }),
+  linkStart: () => ({ t: 'link_start' }),
 };
 function isTempId(id) { return typeof id === 'string' && id.startsWith('tmp-'); }
 
@@ -560,7 +577,10 @@ function alignStats(s, dMs, fromUs, toUs) {
 // exactly like the real hub: delays only move what the page draws, so set the
 // signal delay to leadMs and the markers sit on the kicks.
 function createMockHub(opts) {
-  const o = Object.assign({ bpm: 120, leadMs: 70, oscLeadMs: 40, sampleRate: 48000, peers: 3 }, opts || {});
+  // peers: how many Link peers it hears (0 = the hub waits); joinMs: with
+  // peers 0, three peers in a session at joinBpm appear that long after
+  // start, and the hub joins them.
+  const o = Object.assign({ bpm: 120, leadMs: 70, oscLeadMs: 40, sampleRate: 48000, peers: 3, joinMs: null, joinBpm: 126 }, opts || {});
   const beatUs = 60e6 / o.bpm, bd = blockDurUs(o.sampleRate), sr = o.sampleRate;
   const kickOffsetUs = 250e3;      // first kick 250 ms after start
   let t0 = null, lastUs = null, framesDone = 0, pendingBlocks = [], pendingTs = 0, lastAudioSend = 0;
@@ -568,7 +588,8 @@ function createMockHub(opts) {
   // Link: beat k sits on the k-th MIDI note-on (kick - leadMs), quantum 4, so
   // bars land on the accented kicks once the signal delay is leadMs. set_tempo
   // re-anchors the beat line at the current instant (the kick audio keeps its tempo).
-  const link = { anchorTs: null, anchorBeat: 0, bpm: o.bpm, playing: true, lastSend: -Infinity };
+  const link = { anchorTs: null, anchorBeat: 0, bpm: o.bpm, playing: true, lastSend: -Infinity, peers: Math.max(0, Math.min(3, o.peers)) };
+  link.mode = link.peers ? 'joined' : 'waiting';
   const linkBeat = (t) => link.anchorBeat + (t - link.anchorTs) * link.bpm / 60e6;
   // Peers the mock hub hears (opts.peers of them): a DJ laptop and an app on
   // this machine in the session, a stranger in a session of its own.
@@ -576,8 +597,9 @@ function createMockHub(opts) {
     { node: 'Qx7#kP2a', in_session: true, host: '192.0.2.21', hostname: 'dj-laptop.local', local: false, ageOff: 40 },
     { node: 'v9Lm@w3Z', in_session: true, host: '192.0.2.10', local: true, ageOff: 170 },
     { node: 'Rr4$tYu8', in_session: false, host: '192.0.2.33', local: false, ageOff: 900, bpm: 98, playing: false },
-  ].slice(0, Math.max(0, Math.min(3, o.peers)));
-  const peerList = (t) => MOCK_PEERS.map(p => {
+  ];
+  const heard = () => MOCK_PEERS.slice(0, link.peers);
+  const peerList = (t) => heard().map(p => {
     const r = { node: p.node, session: p.in_session ? 'mockhub!' : p.node, in_session: p.in_session, host: p.host, local: p.local,
       bpm: p.in_session ? link.bpm : p.bpm, age_ms: Math.round(p.ageOff + (t / 1000) % 250) };
     if (p.hostname) r.hostname = p.hostname;
@@ -585,7 +607,9 @@ function createMockHub(opts) {
     if (typeof playing === 'boolean') r.playing = playing;
     return r;
   });
-  const linkMsg = (t) => ({ t: 'link', ts: t, beat: linkBeat(t), bpm: link.bpm, quantum: 4, playing: link.playing, peers: MOCK_PEERS.filter(p => p.in_session).length, peer_list: peerList(t) });
+  const linkMsg = (t) => ({ t: 'link', ts: t, beat: linkBeat(t), bpm: link.bpm, quantum: 4, playing: link.playing, mode: link.mode, peers: heard().filter(p => p.in_session).length, peer_list: peerList(t) });
+  // Re-anchor the beat line at `t` (keeps it continuous), then change it.
+  const relink = (t, f) => { if (link.anchorTs !== null) { link.anchorBeat = linkBeat(t); link.anchorTs = t; } f(); if (link.anchorTs !== null) out.push(linkMsg(t)); };
   let rng = 12345;
   const rnd = () => ((rng = (rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) * 2 - 1;
   const st = {
@@ -632,6 +656,7 @@ function createMockHub(opts) {
   function tick(nowUs) {
     if (t0 === null) { t0 = nowUs; lastUs = nowUs; out.push(helloMsg()); link.anchorTs = t0 + kickOffsetUs - o.leadMs * 1000; }
     const a = lastUs, b = nowUs;
+    if (o.joinMs !== null && link.mode === 'waiting' && b - t0 >= o.joinMs * 1000) relink(b, () => { link.peers = 3; link.mode = 'joined'; link.bpm = o.joinBpm; });
     if (b - link.lastSend >= 250e3) { link.lastSend = b; out.push(linkMsg(b)); }
     // presence of a second device, toggling every 20 s
     const q = Math.floor((b - t0) / 20e6) % 2 === 1;
@@ -679,7 +704,7 @@ function createMockHub(opts) {
     lastUs = b;
     return out.splice(0, out.length);
   }
-  const ALLOWED = { watch: ['addrs'], set_sync: ['signal_delay_ms', 'td_round_trip_ms'], set_follow: ['dest', 'follow'], remap_upsert: ['id', 'dest', 'from', 'to', 'range', 'keep'], remap_delete: ['id'], save: [], set_tempo: ['bpm'], set_playing: ['playing'] };
+  const ALLOWED = { watch: ['addrs'], set_sync: ['signal_delay_ms', 'td_round_trip_ms'], set_follow: ['dest', 'follow'], remap_upsert: ['id', 'dest', 'from', 'to', 'range', 'keep'], remap_delete: ['id'], save: [], set_tempo: ['bpm'], set_playing: ['playing'], link_start: [] };
   function onMessage(m) {
     if (!m || !(m.t in ALLOWED)) { errors.push('unknown message ' + JSON.stringify(m)); return; }
     for (const k of Object.keys(m)) if (k !== 't' && !ALLOWED[m.t].includes(k)) errors.push(m.t + ': unknown field ' + k);
@@ -713,11 +738,11 @@ function createMockHub(opts) {
       case 'set_tempo': case 'set_playing': {
         if (m.t === 'set_tempo' && !(typeof m.bpm === 'number' && m.bpm >= TEMPO_MIN && m.bpm <= TEMPO_MAX)) { errors.push('set_tempo: bpm out of range ' + m.bpm); return; }
         if (m.t === 'set_playing' && typeof m.playing !== 'boolean') { errors.push('set_playing: playing must be a bool'); return; }
-        if (link.anchorTs !== null) { link.anchorBeat = linkBeat(lastUs); link.anchorTs = lastUs; }
-        if (m.t === 'set_tempo') link.bpm = m.bpm; else link.playing = m.playing;
-        if (link.anchorTs !== null) out.push(linkMsg(lastUs));
+        relink(lastUs, () => { if (m.t === 'set_tempo') link.bpm = m.bpm; else link.playing = m.playing; });
         return;
       }
+      // like the hub: founds only while waiting, else ignored
+      case 'link_start': if (link.mode === 'waiting') relink(lastUs, () => { link.mode = 'started'; }); return;
     }
   }
   return { tick: tick, onMessage: onMessage, errors: errors, state: st, opts: o, kickTimeUs: (k) => t0 + kickOffsetUs + k * beatUs };
@@ -726,7 +751,7 @@ function round4(x) { return Math.round(x * 1e4) / 1e4; }
 
 const api = {
   BLOCK_FRAMES, MAX_DELAY_MS, FOLLOWS, KEEP_US, MIN_WINDOW_US, MAX_WINDOW_US,
-  TEMPO_MIN, TEMPO_MAX, LINK_KEEP, LINK_STALE_MS, clampTempo, beatGrid, linkLive, normPeers, peerRows, peerSummary,
+  TEMPO_MIN, TEMPO_MAX, LINK_KEEP, LINK_STALE_MS, LINK_MODES, clampTempo, beatGrid, linkLive, normPeers, peerRows, peerSummary, linkLabel, linkModeNote,
   signalClass, clampDelay, signalDelayMs, audioDelayMs, shiftTs,
   timeToX, xToTime, zoomView, gridStepMs, blockDurUs,
   AudioRing, midiKind, createState, resetBuffers, applyMessage, sortedAddrs, isHot, HEAT_MS, matchPattern,
@@ -783,9 +808,9 @@ function onHubText(text) {
 function latestLink() { return S.links.length ? S.links[S.links.length - 1] : null; }
 function renderLink() {
   const live = L.linkLive(S, performance.now()), l = latestLink(), n = $('#bpm'), p = $('#play');
-  $('#linkst').textContent = live ? 'Link ' + l.peers + ' peer' + (l.peers === 1 ? '' : 's') : 'no Link';
-  $('#linkst').className = live ? '' : 'dim';
-  $('#linkst').textContent += ' ▾';
+  $('#linkst').textContent = L.linkLabel(live ? l : null) + ' ▾';
+  $('#linkst').className = live && l.mode !== 'waiting' ? '' : 'dim';
+  $('#linkstart').hidden = !(live && l.mode === 'waiting');
   renderPeers(live);
   n.disabled = p.disabled = !live;
   if (!live) return;
@@ -797,9 +822,9 @@ function renderPeers(live) {
   const d = $('#peerdrop');
   if (!d.classList.contains('open')) return;
   const peers = live ? S.linkPeers : [];
-  d.classList.toggle('none', !peers.length);
-  if (!peers.length) { d.innerHTML = '<div class="empty">no Link peers</div>'; return; }
-  d.innerHTML = '<div class="note">' + esc(L.peerSummary(peers)) + '</div><table><thead><tr><th>host</th><th>address</th><th>session</th><th>tempo</th><th>seen</th><th>node</th></tr></thead><tbody>' +
+  const mode = '<div class="mode">' + esc(L.linkModeNote(live ? latestLink() : null)) + '</div>';
+  if (!peers.length) { d.innerHTML = mode + '<div class="empty">no Link peers</div>'; return; }
+  d.innerHTML = mode + '<div class="note">' + esc(L.peerSummary(peers)) + '</div><table><thead><tr><th>host</th><th>address</th><th>session</th><th>tempo</th><th>seen</th><th>node</th></tr></thead><tbody>' +
     L.peerRows(peers).map(r => '<tr><td><b>' + esc(r.name) + '</b></td><td class="dim">' + esc(r.addr) + '</td><td' + (r.inSession ? ' class="in"' : ' class="dim"') + '>' + esc(r.session) +
       '</td><td class="v">' + esc(r.tempo) + '</td><td class="v dim">' + esc(r.seen) + '</td><td class="dim">' + esc(r.node) + '</td></tr>').join('') +
     '</tbody></table><div class="note">Link does not say which app a peer is, only where it runs.</div>';
@@ -816,12 +841,13 @@ document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && $('#pe
 $('#bpm').addEventListener('input', () => lastEdit.set('bpm', performance.now()));
 $('#bpm').addEventListener('change', () => { const n = $('#bpm'); if (n.value === '') return; const m = L.msg.setTempo(n.value); n.value = m.bpm; lastEdit.set('bpm', performance.now()); send('bpm', m); });
 $('#play').onclick = () => { const l = latestLink(); if (l) send('play', L.msg.setPlaying(!l.playing)); };
+$('#linkstart').onclick = () => sendNow(L.msg.linkStart());
 setInterval(renderLink, 250);   // "no Link" once messages stop
 let connJustOpened = false;
 function setConn(state, text) { connState = state; const p = $('#conn'); p.className = 'pill ' + (state === 'open' ? (MOCK ? 'mock' : 'ok') : 'bad'); p.textContent = text; }
 
 function connectMock() {
-  const hub = L.createMockHub({ leadMs: Number(params.get('lead') || 70), oscLeadMs: Number(params.get('osclead') || 40), peers: params.has('peers') ? Number(params.get('peers')) : 3 });
+  const hub = L.createMockHub({ leadMs: Number(params.get('lead') || 70), oscLeadMs: Number(params.get('osclead') || 40), peers: params.has('peers') ? Number(params.get('peers')) : 3, joinMs: params.has('join') ? Number(params.get('join')) : null });
   conn = { send: (txt) => hub.onMessage(JSON.parse(txt)) };
   S.freshConnection = true; connJustOpened = true;
   setConn('open', 'MOCK hub (lead ' + hub.opts.leadMs + ' ms)');

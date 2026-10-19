@@ -69,9 +69,10 @@ enabled = true
 controllers = ["*"]         # name filters, substring match; "*" = any
 refresh_ms = 500
 
-# The hub founds an Ableton Link session at this tempo when it hears none,
-# then follows: a player's tempo (a DJ going on Link) wins; the console can
-# set one too.
+# Ableton Link. The hub never founds a session by itself: it waits, and
+# joins the first one it hears at that session's tempo. `tempo` is its own
+# beat while it waits, and the tempo of a session started from the console
+# (Start session) — never imposed on a session it joins.
 [link]
 tempo = 120
 quantum = 4

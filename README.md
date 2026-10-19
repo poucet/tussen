@@ -12,8 +12,10 @@ An OSC/MIDI/audio hub for live performance. One Rust process that:
   slow refresh so late joiners heal;
 - **turns a game controller into OSC** — a pad plugged into the hub machine
   becomes `/tussen/pad/…` (sticks, triggers, buttons, press events);
-- **joins Ableton Link** — founds a session at `[link] tempo` when alone, then
-  follows (a DJ's tempo wins); publishes the beat as `/tussen/clock/…`;
+- **joins Ableton Link** — waits for a session and joins it at its tempo
+  (it never imposes its own), keeping a beat of its own at `[link] tempo`
+  meanwhile; the console can start a session instead; publishes the beat as
+  `/tussen/clock/…`;
 - **captures and streams the music** — a CoreAudio device or output tap,
   streamed as RTP L16 to whoever asked for it;
 - **aligns it all**: two sync delays hold OSC/MIDI back so control signals,
@@ -93,7 +95,7 @@ commented. The short version:
 | `[audio]` | the capture: `""` = default output (tapped), or a device name from `tussen-hub list` |
 | `[midi]` | MIDI inputs (`"*"` = all) and the refresh cadence |
 | `[pad]` | game controllers on this machine (`enabled`, name filters, refresh) |
-| `[link]` | the founding tempo and quantum |
+| `[link]` | the hub's own tempo (while it waits, and for a session started from the console) and quantum |
 | `[sync]` | the two delays, plus per-device `follow` overrides — the console writes these |
 | `[[remap]]` | per-destination address rewrites with optional range mapping — the console writes these |
 | `[console]` | the console port (loopback only) |

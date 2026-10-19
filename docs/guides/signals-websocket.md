@@ -70,7 +70,7 @@ epoch for all frames — deltas are meaningful, the absolute value is not).
 | `osc` | `{"t":"osc","ts":…,"addr":"/ext/x","v":0.5,"src":"127.0.0.1:5000"}` | per message, as routed — watched addresses only; hub-made signals (`/tussen/clock/…`, `/tussen/pad/…`) carry `"src":"hub"` |
 | `midi` | `{"t":"midi","ts":…,"addr":"/tussen/midi/cc/74","v":0.5}` | per MIDI-derived signal, always (no watch needed) |
 | `addrs` | `{"t":"addrs","list":[{"addr":"/ext/x","last_ts":…,"rate":2.5,"v":0.5,"min":0,"max":1,"count":12,"dir":"in"}]}` | ~2 Hz; every address since hub start, sorted, permanent; `dir` ∈ `in`/`out`/`both` |
-| `link` | `{"t":"link","ts":…,"beat":2.5,"bpm":120,"quantum":4,"playing":true,"peers":1,"peer_list":[…]}` | ~4 Hz and on Link status change; `peers` counts the others in the hub's session, `peer_list` is every peer heard (below) |
+| `link` | `{"t":"link","ts":…,"beat":2.5,"bpm":120,"quantum":4,"playing":true,"mode":"joined","peers":1,"peer_list":[…]}` | ~4 Hz and on Link status change; `mode` is `waiting` (in no session; the beat is the hub's own), `joined` or `started` (from the console); `peers` counts the others in the hub's session, `peer_list` is every peer heard (below) |
 | `audio` | `{"t":"audio","ts":…,"blocks":[[min,max,rms],…]}` | ~30 Hz; per-RTP-packet level summaries — the console's waveform, **not** audio data |
 | `dests` | `{"t":"dests","dests":[…]}` | when a device registers or leaves |
 | `saved` | `{"t":"saved","ok":true,"path":"…"}` | reply to the console's save |
