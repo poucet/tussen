@@ -645,12 +645,14 @@ impl Take {
     }
 }
 
-/// The takes directory: `$XDG_DATA_HOME/tussen/takes`, else
-/// `~/.local/share/tussen/takes` (macOS too, as for the config).
-pub fn default_dir(xdg_data_home: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
-    let base = match xdg_data_home {
+/// The takes directory: `~/Music/tussen/takes` — takes are recordings, so
+/// they live with your music, visible, not in a hidden data dir.
+/// `$XDG_MUSIC_DIR` (Linux's name for the music folder), when set and
+/// absolute, replaces `~/Music`.
+pub fn default_dir(xdg_music_dir: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+    let base = match xdg_music_dir {
         Some(x) if x.is_absolute() => x.to_owned(),
-        _ => home.filter(|h| !h.as_os_str().is_empty())?.join(".local").join("share"),
+        _ => home.filter(|h| !h.as_os_str().is_empty())?.join("Music"),
     };
     Some(base.join("tussen").join("takes"))
 }
@@ -737,9 +739,10 @@ mod tests {
     }
 
     #[test]
-    fn the_takes_dir_follows_xdg_data_home() {
+    fn the_takes_dir_is_in_music() {
+        assert_eq!(default_dir(None, Some(Path::new("/h"))), Some("/h/Music/tussen/takes".into()));
         assert_eq!(default_dir(Some(Path::new("/x")), Some(Path::new("/h"))), Some("/x/tussen/takes".into()));
-        assert_eq!(default_dir(Some(Path::new("rel")), Some(Path::new("/h"))), Some("/h/.local/share/tussen/takes".into()));
+        assert_eq!(default_dir(Some(Path::new("rel")), Some(Path::new("/h"))), Some("/h/Music/tussen/takes".into()));
         assert_eq!(default_dir(None, None), None);
     }
 

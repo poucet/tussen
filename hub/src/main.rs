@@ -45,8 +45,8 @@ enum Command {
         /// console's Record button starts and stops takes at any time.
         #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "")]
         record: Option<String>,
-        /// Where takes live. Default: $XDG_DATA_HOME/tussen/takes, else
-        /// ~/.local/share/tussen/takes.
+        /// Where takes live. Default: ~/Music/tussen/takes
+        /// ($XDG_MUSIC_DIR/tussen/takes when set).
         #[arg(long)]
         takes_dir: Option<PathBuf>,
     },

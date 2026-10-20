@@ -6,7 +6,7 @@
 
 - **● Record in the console's top bar** starts a take at any time; ■ Stop
   ends it (elapsed time and take name show while on). A take goes into
-  `~/.local/share/tussen/takes/<UTC time>[-name]/` (`$XDG_DATA_HOME`,
+  `~/Music/tussen/takes/<UTC time>[-name]/` (`$XDG_MUSIC_DIR`,
   `--takes-dir`): every signal the hub routed (OSC, MIDI, pad, with time and
   source), the audio it streamed as a WAV, the Link timeline and the sync
   state, plus a copy of the config. It starts with the last value of every

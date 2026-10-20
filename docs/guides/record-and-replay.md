@@ -157,8 +157,8 @@ tested with no performers, no live audio and no live signals:
 
 ## A take on disk
 
-One folder per take, in `~/.local/share/tussen/takes/` (or
-`$XDG_DATA_HOME/tussen/takes/`; `--takes-dir` picks another):
+One folder per take, in `~/Music/tussen/takes/` (or
+`$XDG_MUSIC_DIR/tussen/takes/`; `--takes-dir` picks another):
 
 ```
 2026-10-20T21-14-03-rehearsal/

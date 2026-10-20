@@ -283,7 +283,7 @@ port = 9098                  # loopback only
     fn save_from_the_built_in_example_goes_to_the_user_config() {
         use crate::config_file::{tests::scratch, Env, Source, SHIPPED};
         let root = scratch("save-builtin");
-        let env = Env { xdg_config_home: Some(root.join("xdg")), home: None, cwd: root.clone(), xdg_data_home: None };
+        let env = Env { xdg_config_home: Some(root.join("xdg")), home: None, cwd: root.clone(), xdg_music_dir: None };
         let mut config = ConfigFile::resolve(None, &env).unwrap();
         assert_eq!(config.source, Source::Builtin);
         let mut state = SyncState::new(SyncConfig::default(), vec![]);

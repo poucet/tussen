@@ -47,7 +47,7 @@ Ranked by how much each one changes. The ids are stable so review comments can c
 | D8 | State on seek and loop (§6.2) | **Restore the last value of every non-event address** at the target, plus note-offs; events (`…/press`, `onbeat`, `tap`, `recenter`) never re-fired | a consistent world after a jump; needs an event list |
 | D11 | Recorded hellos and byes (§4.1) | **Recorded, never replayed** | no phantom devices at a venue's IP addresses |
 | D10 | How a replay is started (§7) | **Settled otherwise: `simply-tussen replay <take>`**, its own command over `run`'s startup; recording from the console's Record button (pulled forward from S3), `run --record` as a launch shortcut | one config, one console; replay and live never share a process |
-| D9 | Where takes live (§3.1) | **`$XDG_DATA_HOME/tussen/takes/`**, else `~/.local/share/tussen/takes/`, on macOS too; `--takes-dir` and `[replay] dir` override | mirrors the config's XDG choice |
+| D9 | Where takes live (§3.1) | **`~/Music/tussen/takes/`** (`$XDG_MUSIC_DIR` when set); `--takes-dir` overrides (Chris: takes are recordings — a visible folder with your music, not a hidden data dir) | where users find their takes |
 | D12 | Playback rate (§6.3) | **1.0 only** until a later stage; varispeed (audio pitched) is the first step beyond | keeps audio and OSC trivially in step |
 
 ### Questions Chris answered (2026-10-20)
@@ -137,7 +137,7 @@ Code archaeology on `main` (`quplzywy`). Several questions shrink because of wha
 ### §3.1 A directory per take
 
 ```
-~/.local/share/tussen/takes/2026-10-20T21-14-03-rehearsal/
+~/Music/tussen/takes/2026-10-20T21-14-03-rehearsal/
   take.toml      # meta: version, UTC start, hub-clock at t=0, sample rate, channels,
                  #       packet frames, signal delay, markers, duration (rewritten each flush)
   audio.wav      # L16 stereo 48 kHz, exactly what RTP carried
@@ -147,7 +147,7 @@ Code archaeology on `main` (`quplzywy`). Several questions shrink because of wha
 ```
 
 - **Inspectable**: the WAV opens in any DAW; `tussen-hub take dump <take>` prints the log as NDJSON (`jq`-ready).
-- **Where (D9)**: `$XDG_DATA_HOME/tussen/takes/`, else `~/.local/share/tussen/takes/`. That is the data twin of the config's `~/.config/tussen/`, the same CLI-tool convention on macOS (`config_file.rs` module doc) □. `--takes-dir <path>` or `[replay] dir` override it.
+- **Where (D9)**: `~/Music/tussen/takes/` (`$XDG_MUSIC_DIR/tussen/takes/` when set): takes are recordings, so they sit visibly with the user's music rather than in a hidden data directory. `--takes-dir <path>` or `[replay] dir` override it.
 - **Names**: UTC timestamp plus `--take-name`. `latest` resolves to the newest.
 
 ### §3.2 The event log (D3)

@@ -50,7 +50,7 @@ pub struct Env {
     pub home: Option<PathBuf>,
     pub cwd: PathBuf,
     /// Where takes live ([`crate::take::default_dir`]).
-    pub xdg_data_home: Option<PathBuf>,
+    pub xdg_music_dir: Option<PathBuf>,
 }
 
 impl Env {
@@ -59,13 +59,13 @@ impl Env {
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
             home: std::env::var_os("HOME").map(PathBuf::from),
             cwd: std::env::current_dir()?,
-            xdg_data_home: std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
+            xdg_music_dir: std::env::var_os("XDG_MUSIC_DIR").map(PathBuf::from),
         })
     }
 
-    /// `$XDG_DATA_HOME/tussen/takes`, else `$HOME/.local/share/tussen/takes`.
+    /// `~/Music/tussen/takes` (`$XDG_MUSIC_DIR/tussen/takes` when set).
     pub fn takes_dir(&self) -> Option<PathBuf> {
-        crate::take::default_dir(self.xdg_data_home.as_deref(), self.home.as_deref())
+        crate::take::default_dir(self.xdg_music_dir.as_deref(), self.home.as_deref())
     }
 
     /// `$XDG_CONFIG_HOME/tussen/hub.toml`, else `$HOME/.config/tussen/hub.toml`.
@@ -199,7 +199,7 @@ pub(crate) mod tests {
         let cwd = root.join("repo").join("sub");
         std::fs::create_dir_all(&cwd).unwrap();
         std::fs::write(root.join("repo").join("hub.toml"), "# repo\n").unwrap();
-        Env { xdg_config_home: Some(root.join("xdg")), home: Some(root.join("home")), cwd, xdg_data_home: None }
+        Env { xdg_config_home: Some(root.join("xdg")), home: Some(root.join("home")), cwd, xdg_music_dir: None }
     }
 
     #[test]
