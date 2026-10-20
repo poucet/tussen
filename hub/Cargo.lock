@@ -466,7 +466,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1398,6 +1398,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "simply-audio-device"
+version = "0.1.0"
+source = "git+https://github.com/poucet/audiowatch.git#44727a052421e535505583e2f15a94f67cf59cfe"
+dependencies = [
+ "cpal",
+]
+
+[[package]]
 name = "simply-link"
 version = "1.0.0"
 source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.0#bd268fe1a6b5be1c673739e816c4f082ca20193b"
@@ -1431,6 +1439,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "cpal",
  "crossbeam-channel",
  "dns-lookup",
  "env_logger",
@@ -1442,6 +1451,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "simply-audio-capture",
+ "simply-audio-device",
  "simply-link",
  "simply-midi",
  "simply-osc",
@@ -1770,7 +1780,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

@@ -108,13 +108,19 @@ impl Default for OscConfig {
 #[derive(Clone, Debug, Deserialize)]
 pub struct DestConfig {
     pub name: String,
+    /// Where its OSC goes. A destination without a `port` gets no OSC
+    /// (an `audio_out`-only one).
+    #[serde(default)]
     pub host: String,
+    #[serde(default)]
     pub port: u16,
+    #[serde(default)]
     pub subscribe: Vec<String>,
     #[serde(default)]
     pub exclude: Vec<String>,
-    /// engine | td | monitor; decides who may be delayed.
-    /// Default: by name (`engine`, `monitor`), else `td`.
+    /// engine | td | monitor | device; decides who may be delayed.
+    /// Default: by name (`engine`, `monitor`), else `td`; an `audio_out`
+    /// destination defaults to `engine` (the room: undelayed).
     #[serde(default)]
     pub kind: Option<crate::sync::DestKind>,
     /// Also stream the hub's audio (RTP L16, as to devices) to this
@@ -122,11 +128,25 @@ pub struct DestConfig {
     /// TouchDesigner laptop's GStreamer. Absent or 0 = no audio.
     #[serde(default)]
     pub rtp_port: Option<u16>,
+    /// Play the hub's audio stream on a local output device: a name as
+    /// `simply-tussen list` prints it, or a unique part of one; "" = the
+    /// system default output. It receives the same RTP stream as any
+    /// consumer, delayed as its kind says ([`crate::sync::SyncState::audio_delay_ms`]).
+    #[serde(default)]
+    pub audio_out: Option<String>,
 }
 
 impl DestConfig {
     pub fn kind(&self) -> crate::sync::DestKind {
-        self.kind.unwrap_or_else(|| crate::sync::DestKind::from_static_name(&self.name))
+        self.kind.unwrap_or_else(|| match self.audio_out {
+            Some(_) => crate::sync::DestKind::Engine,
+            None => crate::sync::DestKind::from_static_name(&self.name),
+        })
+    }
+
+    /// Whether the router sends it OSC (it has a port).
+    pub fn has_osc(&self) -> bool {
+        self.port != 0
     }
 }
 
@@ -139,7 +159,15 @@ impl Config {
 
     /// Parse config text; `origin` names it in the error.
     pub fn parse(text: &str, origin: &str) -> anyhow::Result<Config> {
-        toml::from_str(text).with_context(|| format!("parsing {origin}"))
+        let config: Config = toml::from_str(text).with_context(|| format!("parsing {origin}"))?;
+        for d in &config.dests {
+            anyhow::ensure!(
+                d.has_osc() || d.audio_out.is_some(),
+                "{origin}: destination {:?} has neither a port (OSC) nor an audio_out",
+                d.name
+            );
+        }
+        Ok(config)
     }
 
     /// The config `file` names — its text, or the built-in example's.
@@ -174,6 +202,31 @@ mod tests {
         let rtp: Vec<Option<u16>> = config.dests.iter().map(|d| d.rtp_port).collect();
         assert_eq!(rtp, [None, None, Some(5006)]);
         assert_eq!(config.link, crate::link::LinkConfig { tempo: 120.0, quantum: 4.0 });
+        // No local audio output until someone uncomments the example.
+        assert!(config.dests.iter().all(|d| d.audio_out.is_none()));
+        let example: String = text
+            .lines()
+            .skip_while(|l| !l.starts_with("# [[dest]]"))
+            .take_while(|l| l.starts_with('#'))
+            .map(|l| l.trim_start_matches('#').trim_start_matches(' '))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out: Config = toml::from_str(&example).expect("the commented audio_out destination parses");
+        assert_eq!(out.dests[0].audio_out.as_deref(), Some(""));
+        assert_eq!(out.dests[0].kind(), DestKind::Engine);
+    }
+
+    #[test]
+    fn an_audio_out_destination_needs_no_osc_and_defaults_to_the_room() {
+        let c = Config::parse("[[dest]]\nname = \"speakers\"\naudio_out = \"\"\n", "t").unwrap();
+        let d = &c.dests[0];
+        assert!(!d.has_osc());
+        assert_eq!(d.audio_out.as_deref(), Some(""));
+        assert_eq!(d.kind(), crate::sync::DestKind::Engine, "the room: undelayed");
+        let c = Config::parse("[[dest]]\nname = \"phones\"\naudio_out = \"Head\"\nkind = \"device\"\n", "t").unwrap();
+        assert_eq!(c.dests[0].kind(), crate::sync::DestKind::Device);
+        let e = Config::parse("[[dest]]\nname = \"x\"\n", "t").unwrap_err().to_string();
+        assert!(e.contains("neither a port"), "{e}");
     }
 
     #[test]

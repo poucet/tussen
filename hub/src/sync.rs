@@ -70,6 +70,16 @@ pub enum DestKind {
 }
 
 impl DestKind {
+    /// The config's word for it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DestKind::Engine => "engine",
+            DestKind::Td => "td",
+            DestKind::Monitor => "monitor",
+            DestKind::Device => "device",
+        }
+    }
+
     /// A static destination's kind when its config doesn't say: by its
     /// conventional name, else a TouchDesigner-like delayable receiver.
     pub fn from_static_name(name: &str) -> DestKind {

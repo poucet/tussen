@@ -48,6 +48,14 @@ pub struct RtpTarget {
     pub delay_ms: u32,
 }
 
+/// An `audio_out` destination's receiver, as the hub loop sees it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputTarget {
+    pub name: String,
+    pub kind: crate::sync::DestKind,
+    pub addr: SocketAddr,
+}
+
 /// What the hub loop and the audio sender share: where to send RTP
 /// (devices that gave a nonzero rtp_port in their hello — the hub loop
 /// rewrites this after every hello/bye/prune and sync change) and the
@@ -55,6 +63,10 @@ pub struct RtpTarget {
 #[derive(Default)]
 pub struct AudioLink {
     pub targets: Mutex<Vec<RtpTarget>>,
+    /// `audio_out` destinations: local output devices, each an in-process
+    /// RTP receiver ([`crate::audio_out`]) on loopback. Fed like a device
+    /// (the delay ring), at the delay their kind gives them.
+    pub outputs: Mutex<Vec<OutputTarget>>,
     /// Static destinations with an `rtp_port` (set once at hub start):
     /// the same audio, undelayed, each on its own RTP stream (SSRC).
     pub static_targets: Mutex<Vec<SocketAddr>>,

@@ -12,6 +12,7 @@
 //! device's signal state, and the binary in `main.rs` is a thin CLI over
 //! both.
 
+pub mod audio_out;
 pub mod bundles;
 pub mod catalog;
 pub mod config;

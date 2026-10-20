@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 use simply_link::{Link, Network};
 use simply_osc::{Listener, Message, Value};
 use tussen_hub::config::Config;
-use tussen_hub::generators::audio::{rtp, stream_ring, AudioLink};
+use tussen_hub::audio_out::{self, Feed};
+use tussen_hub::generators::audio::{rtp, stream_ring, AudioLink, OutputTarget};
+use tussen_hub::sync::DestKind;
 use tussen_hub::hub::{self, Extras, Takes};
 use tussen_hub::replay::{self, LinkMode, Options};
 use tussen_hub::record;
@@ -110,12 +112,18 @@ fn signed_ms(a: Instant, b: Instant) -> f64 {
 /// Replay `take` into a fresh hub with a registered device; returns
 /// (device, replay, hub) once the device is in.
 fn replay(take: Take, opts: Options, audio: bool) -> (Device, replay::Replay, hub::Hub, Arc<AudioLink>) {
-    replay_with(config(), take, opts, audio)
+    replay_with(config(), take, opts, audio, Vec::new())
 }
 
-fn replay_with(config: Config, take: Take, opts: Options, audio: bool) -> (Device, replay::Replay, hub::Hub, Arc<AudioLink>) {
+fn replay_with(
+    config: Config,
+    take: Take,
+    opts: Options,
+    audio: bool,
+    outputs: Vec<OutputTarget>,
+) -> (Device, replay::Replay, hub::Hub, Arc<AudioLink>) {
     let cfg = config.audio.clone();
-    let link = Arc::new(AudioLink::default());
+    let link = Arc::new(AudioLink { outputs: Mutex::new(outputs), ..AudioLink::default() });
     let (rtx, rrx) = crossbeam_channel::bounded(4096);
     let (_g, grx) = crossbeam_channel::bounded::<Message>(1);
     let hub = hub::spawn_with_takes(
@@ -129,6 +137,43 @@ fn replay_with(config: Config, take: Take, opts: Options, audio: bool) -> (Devic
     let dev = Device::register(&hub, "shader");
     let r = replay::start(Arc::new(take), &opts, rtx, audio.then(|| (cfg, Arc::clone(&link))), None).unwrap();
     (dev, r, hub, link)
+}
+
+/// An `audio_out` destination with a stand-in for the device: the real
+/// RTP receiver and [`Feed`], pulled at 48 kHz in 5 ms device buffers until
+/// `until`. Returns the target to register, and a thread answering when
+/// each click came out of the "device" (rising edges, 0.5 s apart at
+/// least) and how many frames it played dry once it had started.
+fn fake_output(name: &str, kind: DestKind, until: Instant) -> (OutputTarget, std::thread::JoinHandle<(Vec<Instant>, u64)>, audio_out::Receiver) {
+    let (tx, rx) = audio_out::ring(48000, 2);
+    let recv = audio_out::receive(tx).unwrap();
+    let target = OutputTarget { name: name.into(), kind, addr: recv.addr };
+    let thread = std::thread::spawn(move || {
+        let mut feed = Feed::new(rx, 48000, 2, 48000, 2);
+        let mut buf = vec![0.0f32; 240 * 2];
+        let (mut clicks, mut dry_from, mut last_hi) = (Vec::<Instant>::new(), None, false);
+        let start = Instant::now();
+        let mut played = 0u64;
+        while Instant::now() < until {
+            let due = (start.elapsed().as_secs_f64() * 48000.0) as u64;
+            while played + 240 <= due {
+                feed.fill(&mut buf);
+                played += 240;
+                if feed.playing() && dry_from.is_none() {
+                    dry_from = Some(feed.stats.underruns.load(Ordering::Relaxed));
+                }
+                let hi = buf.iter().any(|s| *s > 0.5);
+                if hi && !last_hi && clicks.last().is_none_or(|c| c.elapsed() > Duration::from_millis(500)) {
+                    clicks.push(Instant::now());
+                }
+                last_hi = hi;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let dry = feed.stats.underruns.load(Ordering::Relaxed) - dry_from.unwrap_or(0);
+        (clicks, dry)
+    });
+    (target, thread, recv)
 }
 
 fn off() -> Options {
@@ -498,8 +543,14 @@ fn a_replay_drives_td_and_a_device_through_both_sync_points() {
         }
         None
     });
-    let (dev, r, _hub, link) = replay_with(config, take, off(), true);
-    std::thread::sleep(Duration::from_millis(1600));
+    // Two audio_out destinations: the room (engine: undelayed) and a pair
+    // of headphones that follow TD like a device (the 40 ms round trip).
+    // The run crosses one loop seam (the whole 2 s take loops).
+    let until = Instant::now() + Duration::from_millis(4600);
+    let (room, room_out, room_rx) = fake_output("room", DestKind::Engine, until);
+    let (phones, phones_out, phones_rx) = fake_output("phones", DestKind::Device, until);
+    let (dev, r, _hub, link) = replay_with(config, take, off(), true, vec![room, phones]);
+    std::thread::sleep(Duration::from_millis(4400));
     drop(r);
     link.stop.store(true, Ordering::Relaxed);
     let td_hit = td_hit.join().unwrap().expect("TD got the replayed hit");
@@ -517,5 +568,39 @@ fn a_replay_drives_td_and_a_device_through_both_sync_points() {
     assert!((rt - 40.0).abs() < 6.0, "the device's signals run {rt:.1} ms behind TD's (round trip 40)");
     let rt_audio = signed_ms(dev_click, td_click);
     assert!((rt_audio - 40.0).abs() < 8.0, "the device's audio runs {rt_audio:.1} ms behind TD's");
+
+    // The audio outputs: the same stream, at their kind's delay, with the
+    // jitter buffer's 20 ms (+ one 5 ms device buffer) on top.
+    let (room, room_dry) = room_out.join().unwrap();
+    let (phones, phones_dry) = phones_out.join().unwrap();
+    assert_eq!(room.len(), 2, "the room heard the click in both passes: {room:?}");
+    assert_eq!(phones.len(), 2, "the headphones too: {phones:?}");
+    let at_room = signed_ms(room[0], td_click);
+    assert!((5.0..40.0).contains(&at_room), "the room hears the music {at_room:.1} ms after TD's RTP (jitter buffer)");
+    let held = signed_ms(phones[0], room[0]);
+    assert!((held - 40.0).abs() < 10.0, "a device-kind output runs {held:.1} ms behind the room (round trip 40)");
+    // Across the seam: the pass length, as on RTP; nothing ran dry.
+    let pass = signed_ms(room[1], room[0]);
+    let rtp_clicks: Vec<Instant> = dev
+        .rtp
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|p| p.1.samples.iter().any(|s| *s > 0.5))
+        .map(|p| p.0)
+        .fold(Vec::new(), |mut v, t| {
+            if v.last().is_none_or(|l: &Instant| t.duration_since(*l) > Duration::from_millis(500)) {
+                v.push(t);
+            }
+            v
+        });
+    assert_eq!(rtp_clicks.len(), 2, "the device's RTP saw both passes");
+    let rtp_pass = signed_ms(rtp_clicks[1], rtp_clicks[0]);
+    assert!((pass - rtp_pass).abs() < 8.0, "the seam: {pass:.1} ms between passes at the room, {rtp_pass:.1} on RTP");
+    assert_eq!((room_dry, phones_dry), (0, 0), "the outputs never ran dry once started");
+    for rx in [&room_rx, &phones_rx] {
+        let st = &rx.stats;
+        assert_eq!((st.lost.load(Ordering::Relaxed), st.late.load(Ordering::Relaxed)), (0, 0), "RTP in order, none lost");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

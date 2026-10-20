@@ -20,6 +20,7 @@ pub fn run() -> anyhow::Result<()> {
         let default = if d.is_default_output { "  (default output)" } else { "" };
         println!("  {kind} {}  — {how}{default}", d.name);
     }
+    println!("  ([out] and [in/out] names also work as a [[dest]]'s audio_out = \"<name>\"; \"\" = the default output)");
 
     println!("MIDI inputs:");
     match simply_midi::input::input_ports("simply-tussen") {

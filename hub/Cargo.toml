@@ -29,6 +29,11 @@ env_logger = "0.11"
 # an output (macOS 14.2+), resampled to [audio] sample_rate. Shared with
 # audiowatch, which owns it.
 simply-audio-capture = { git = "https://github.com/poucet/audiowatch.git" }
+# The hub's one audio output: a replay played on a local device ([replay]
+# audio_out). Device selection from audiowatch's shared crate; the stream
+# itself is cpal's (same version the crate pins).
+simply-audio-device = { git = "https://github.com/poucet/audiowatch.git" }
+cpal = "0.18.2"
 # Wait-free SPSC ring for the capture callback → sender thread hand-off
 rtrb = "0.3"
 # Hub console. tungstenite is the whole WebSocket stack with no

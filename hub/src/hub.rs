@@ -182,6 +182,8 @@ pub fn spawn_with_takes(
             let mut l = Loop::new(&config, router, extras, takes);
             l.hub_port = addr.port();
             l.resolved = resolved;
+            // The audio_out destinations are there from the start.
+            sync_rtp_targets(l.audio.as_deref(), &l.router, &l.sync);
             l.run(&out, net_rx, generated, &malformed, &stop, quiet)
         }
     })?;
@@ -777,7 +779,8 @@ fn tap(c: &mut ConsoleSide, m: &Message, from: Src, class: Class, now: Instant) 
 }
 
 /// Hand the audio sender the current RTP target list (devices whose
-/// hello carried a nonzero rtp_port), each with its audio delay
+/// hello carried a nonzero rtp_port, and the `audio_out` destinations),
+/// each with its audio delay
 /// — called whenever registration or the sync state changes, so
 /// the stream follows hellos, byes, timeouts and the console.
 fn sync_rtp_targets(audio: Option<&AudioLink>, router: &Router, sync: &SyncState) {
@@ -789,6 +792,10 @@ fn sync_rtp_targets(audio: Option<&AudioLink>, router: &Router, sync: &SyncState
                 addr: SocketAddr::new(d.addr.ip(), d.rtp_port),
                 delay_ms: sync.audio_delay_ms(&d.name, sync::DestKind::Device),
             })
+            .chain(a.outputs.lock().map(|o| o.clone()).unwrap_or_default().into_iter().map(|o| RtpTarget {
+                addr: o.addr,
+                delay_ms: sync.audio_delay_ms(&o.name, o.kind),
+            }))
             .collect();
         if let Ok(mut targets) = a.targets.lock() {
             *targets = list;

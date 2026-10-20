@@ -114,7 +114,7 @@ impl Router {
     /// periodic re-resolve ([`Router::set_static_addr`]) finds it.
     pub fn from_config(config: &Config) -> anyhow::Result<Router> {
         let mut statics = Vec::new();
-        for d in &config.dests {
+        for d in config.dests.iter().filter(|d| d.has_osc()) {
             let resolved = resolve_host(&d.host, d.port);
             if resolved.is_none() {
                 log::warn!("destination {}: {} doesn't resolve yet; retrying every few seconds", d.name, d.host);

@@ -52,6 +52,16 @@ subscribe = ["/tussen/", "/ext/", "/djay/"]
 exclude = ["/tussen/hub/"]
 rtp_port = 5006
 
+# A local audio output is a destination too: the hub's audio stream played on a
+# device of this machine (headphones to monitor the mix live, speakers to hear a
+# replay). Any output `simply-tussen list` prints, or a unique part of its name;
+# "" = the default output. It has no OSC. Undelayed (kind = "engine", the room);
+# kind = "device" holds it back by the TD round trip, like a device's audio.
+# During `run` it can't be the output [audio] taps: that would capture itself.
+# [[dest]]
+# name = "speakers"
+# audio_out = ""
+
 # The audio the hub streams to the visuals destination and the devices. Any
 # name `simply-tussen list` prints: a device with inputs is read, an output-only
 # one is tapped. "" = this machine's default output.

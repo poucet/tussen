@@ -6,10 +6,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tussen_hub::audio_out;
 use tussen_hub::config::Config;
 use tussen_hub::config_file::ConfigFile;
 use tussen_hub::console::{self, ConsoleOptions};
-use tussen_hub::generators::audio::{AudioGenerator, AudioLink};
+use tussen_hub::generators::audio::{self, AudioGenerator, AudioLink, OutputTarget};
 use tussen_hub::generators::{self, Generator};
 use tussen_hub::hub;
 use tussen_hub::link;
@@ -51,7 +52,7 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
         config.dests.len(),
         config.osc.max_packet
     );
-    for d in &config.dests {
+    for d in config.dests.iter().filter(|d| d.has_osc()) {
         log::info!("  dest {} → {}:{} subscribe={:?} exclude={:?}", d.name, d.host, d.port, d.subscribe, d.exclude);
     }
     let replaying = match &sources {
@@ -62,6 +63,34 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
         Sources::Live { .. } => None,
     };
     let audio_link = Arc::new(AudioLink::default());
+    // `audio_out` destinations: local devices on the hub's RTP stream. Live,
+    // the output [audio] taps is refused (it would capture itself).
+    let tapped = match (&sources, audio::resolve(&audio::list_devices(), &config.audio)) {
+        (Sources::Live { .. }, Ok(simply_audio_capture::Source::Tap(name))) => Some(name),
+        _ => None,
+    };
+    let mut _outputs = Vec::new();
+    let mut output_lines = Vec::new();
+    for (d, wanted) in config.dests.iter().filter_map(|d| Some(d).zip(d.audio_out.as_deref())) {
+        match open_output(wanted, &config, tapped.as_deref()) {
+            Ok(out) => {
+                let line = format!(
+                    "dest {} → audio out {:?} ({} Hz), kind {}",
+                    d.name,
+                    out.device.name,
+                    out.device.rate,
+                    d.kind().as_str()
+                );
+                log::info!("  {line}");
+                output_lines.push(line);
+                if let Ok(mut o) = audio_link.outputs.lock() {
+                    o.push(OutputTarget { name: d.name.clone(), kind: d.kind(), addr: out.receiver.addr });
+                }
+                _outputs.push(out);
+            }
+            Err(e) => log::warn!("dest {}: audio out {wanted:?} unavailable: {e:#}", d.name),
+        }
+    }
     // Recording on demand (console Record, `run --record`). A replay has
     // it wired the same way but switched off: the button shows, disabled.
     let recording = Some({
@@ -167,11 +196,32 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
     extras.audio = Some(audio_link);
     let hub = hub::spawn_with_takes(config, rx, !stats, extras, takes_io)?;
     let osc_port = hub.addr().port();
-    print!("{}", banner(console_at, osc_port, &console::osc_endpoint(osc_port).ips, &config_shown, doing.as_deref()));
+    let extra: Vec<String> = doing.into_iter().chain(output_lines).collect();
+    print!("{}", banner(console_at, osc_port, &console::osc_endpoint(osc_port).ips, &config_shown, &extra));
     use std::io::Write;
     let _ = std::io::stdout().flush();
     hub.join();
     Ok(())
+}
+
+/// Open an `audio_out` destination's device `wanted` on the hub's stream format.
+fn open_output(wanted: &str, config: &Config, tapped: Option<&str>) -> anyhow::Result<audio_out::AudioOut> {
+    let name = audio_out::device_name(wanted)?;
+    anyhow::ensure!(
+        tapped != Some(name.as_str()),
+        "{name:?} is the output [audio] device taps; playing the capture there would feed it back into itself"
+    );
+    let out = audio_out::open(&name, config.audio.sample_rate, config.audio.channels)?;
+    if out.device.rate != config.audio.sample_rate {
+        log::info!(
+            "audio out {:?}: {} Hz {}ch, resampled from {} Hz (linear)",
+            out.device.name,
+            out.device.rate,
+            out.device.channels,
+            config.audio.sample_rate
+        );
+    }
+    Ok(out)
 }
 
 /// Where the console ended up, for the banner.
@@ -184,15 +234,16 @@ enum ConsoleAt {
 
 /// The startup banner: plain stdout, after the log lines, saying where
 /// to reach the hub. `lan` is the console's own LAN-IP answer
-/// ([`console::osc_endpoint`]); empty prints `?`.
-fn banner(console: ConsoleAt, osc_port: u16, lan: &[String], config: &str, take: Option<&str>) -> String {
+/// ([`console::osc_endpoint`]); empty prints `?`. `extra`: one line each
+/// (what the hub is doing, its audio outputs).
+fn banner(console: ConsoleAt, osc_port: u16, lan: &[String], config: &str, extra: &[String]) -> String {
     let console = match console {
         ConsoleAt::Up(a) => format!("http://127.0.0.1:{}", a.port()),
         ConsoleAt::Disabled => "disabled ([console] enabled = false)".into(),
         ConsoleAt::Failed => "unavailable (see the warning above)".into(),
     };
     let lan = lan.first().map_or("?", String::as_str);
-    let take = take.map_or_else(String::new, |t| format!("  {t}\n"));
+    let take: String = extra.iter().map(|t| format!("  {t}\n")).collect();
     format!(
         "\n  tussen hub console → {console}\n  hub OSC            → {lan}:{osc_port} (local: 127.0.0.1:{osc_port})\n  config             → {config}\n{take}\n"
     )
@@ -204,15 +255,19 @@ mod tests {
 
     #[test]
     fn the_banner_says_where_to_reach_the_hub() {
-        let b = banner(ConsoleAt::Up("127.0.0.1:9098".parse().unwrap()), 9000, &["10.0.0.5".into()], "/c/hub.toml (user)", None);
+        let b = banner(ConsoleAt::Up("127.0.0.1:9098".parse().unwrap()), 9000, &["10.0.0.5".into()], "/c/hub.toml (user)", &[]);
         assert!(b.contains("tussen hub console → http://127.0.0.1:9098\n"), "{b}");
         assert!(b.contains("hub OSC            → 10.0.0.5:9000 (local: 127.0.0.1:9000)\n"), "{b}");
         assert!(b.contains("config             → /c/hub.toml (user)\n"), "{b}");
-        let b = banner(ConsoleAt::Disabled, 9000, &[], "x", None);
+        let b = banner(ConsoleAt::Disabled, 9000, &[], "x", &[]);
         assert!(b.contains("console → disabled"), "{b}");
         assert!(b.contains("OSC            → ?:9000"), "{b}");
-        assert!(banner(ConsoleAt::Failed, 1, &[], "x", None).contains("unavailable"));
-        let b = banner(ConsoleAt::Disabled, 9000, &[], "x", Some("recording          → /t/take"));
-        assert!(b.contains("config             → x\n  recording          → /t/take\n"), "{b}");
+        assert!(banner(ConsoleAt::Failed, 1, &[], "x", &[]).contains("unavailable"));
+        let extra = ["recording          → /t/take".to_owned(), "dest phones → audio out \"H\" (48000 Hz), kind engine".to_owned()];
+        let b = banner(ConsoleAt::Disabled, 9000, &[], "x", &extra);
+        assert!(
+            b.contains("config             → x\n  recording          → /t/take\n  dest phones → audio out \"H\" (48000 Hz), kind engine\n"),
+            "{b}"
+        );
     }
 }
