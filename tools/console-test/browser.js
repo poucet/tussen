@@ -247,6 +247,16 @@ let ch = null;
   await ev("document.querySelector('#rec').click()");
   await sleep(400);
   ok(/Record/.test(await ev("document.querySelector('#rec').textContent")) && await ev("document.querySelector('#recinfo').textContent") === '', 'Stop: back to Record, the clock goes');
+  ok(await ev("document.querySelector('#replayst').hidden"), 'live: no REPLAY label');
+  // A replaying hub: no Record button at all, the REPLAY label instead.
+  await cdp('Page.navigate', { url: page + '&replay=1' });
+  await sleep(1500);
+  ok(await ev("document.querySelector('#recgrp').hidden && document.querySelector('#recgrp').offsetParent === null"), 'replaying: no Record button');
+  ok(/^REPLAY 2026-10-20T21-14-03-rehearsal · bar \d+\.\d\/24 · loop 9–17$/.test(await ev("document.querySelector('#replayst').textContent")) && !(await ev("document.querySelector('#replayst').hidden")), 'replaying: the REPLAY label', await ev("document.querySelector('#replayst').textContent"));
+  const shotRp = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: 120, scale: 1 } });
+  fs.writeFileSync(path.join(shotDir, 'console-replaying.png'), Buffer.from(shotRp.result.data, 'base64'));
+  await cdp('Page.navigate', { url: page });
+  await sleep(1500);
 
   // ---- waiting for a Link session → Start session ----------------------------
   ok(await ev("document.querySelector('#linkstart').hidden"), 'in a session: no Start session button');
@@ -281,7 +291,7 @@ let ch = null;
 
   ok(errors.length === 0, 'no uncaught errors / console errors', errors);
 
-  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-waiting.png, console-link-started.png, console-recording.png');
+  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-waiting.png, console-link-started.png, console-recording.png, console-replaying.png');
   console.log((fail ? 'FAILED' : 'ok') + ': ' + pass + ' passed, ' + fail + ' failed');
   clearTimeout(killer); ws.close(); ch.kill('SIGKILL');
   process.exit(fail ? 1 : 0);

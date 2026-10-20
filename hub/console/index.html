@@ -79,7 +79,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
   <button id="pause" title="Space">⏸ pause</button>
   <span>window <input id="win" type="number" min="50" max="10000" step="10" value="2000"> ms</span>
   <span>gain <input id="gain" type="number" min="0.25" max="64" step="0.25" value="1"></span>
-  <span id="recgrp"><button id="rec" hidden title="record a take: every signal, the audio and the Link timeline, from now until Stop (simply-tussen replay plays it back)">● Record</button> <span id="recinfo"></span></span>
+  <span id="recgrp" hidden><button id="rec" title="record a take: every signal, the audio and the Link timeline, from now until Stop (simply-tussen replay plays it back)">● Record</button> <span id="recinfo"></span></span>
   <span id="replayst" hidden title="the hub is replaying a take (simply-tussen replay): every signal and the audio come from it"></span>
   <span id="linkgrp" title="Ableton Link: the hub joins the session it hears, or waits with a beat of its own; the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="who is in the Link session — click for the list">no Link</span><div id="peerdrop" role="dialog" aria-label="Link peers"></div> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button> <button id="linkstart" hidden title="found a Link session now, at this tempo — for when nobody else will join">⊕ start session</button></span>
   <span id="readout" class="dim">—</span>
@@ -608,7 +608,9 @@ function createMockHub(opts) {
   // peers: how many Link peers it hears (0 = the hub waits); joinMs: with
   // peers 0, three peers in a session at joinBpm appear that long after
   // start, and the hub joins them.
-  const o = Object.assign({ bpm: 120, leadMs: 70, oscLeadMs: 40, sampleRate: 48000, peers: 3, joinMs: null, joinBpm: 126 }, opts || {});
+  // replay: behave like `simply-tussen replay` — no record in hello,
+  // record_start refused, link frames carry `replay`.
+  const o = Object.assign({ bpm: 120, leadMs: 70, oscLeadMs: 40, sampleRate: 48000, peers: 3, joinMs: null, joinBpm: 126, replay: false }, opts || {});
   const beatUs = 60e6 / o.bpm, bd = blockDurUs(o.sampleRate), sr = o.sampleRate;
   const kickOffsetUs = 250e3;      // first kick 250 ms after start
   let t0 = null, lastUs = null, framesDone = 0, pendingBlocks = [], pendingTs = 0, lastAudioSend = 0;
@@ -635,7 +637,11 @@ function createMockHub(opts) {
     if (typeof playing === 'boolean') r.playing = playing;
     return r;
   });
-  const linkMsg = (t) => ({ t: 'link', ts: t, beat: linkBeat(t), bpm: link.bpm, quantum: 4, playing: link.playing, mode: link.mode, peers: heard().filter(p => p.in_session).length, peer_list: peerList(t) });
+  const linkMsg = (t) => {
+    const m = { t: 'link', ts: t, beat: linkBeat(t), bpm: link.bpm, quantum: 4, playing: link.playing, mode: link.mode, peers: heard().filter(p => p.in_session).length, peer_list: peerList(t) };
+    if (o.replay) m.replay = { take: '2026-10-20T21-14-03-rehearsal', bar: round4(9 + ((linkBeat(t) / 4) % 8 + 8) % 8), bars: 24, loop: [9, 17] };
+    return m;
+  };
   // Re-anchor the beat line at `t` (keeps it continuous), then change it.
   const relink = (t, f) => { if (link.anchorTs !== null) { link.anchorBeat = linkBeat(t); link.anchorTs = t; } f(); if (link.anchorTs !== null) out.push(linkMsg(t)); };
   let rng = 12345;
@@ -663,7 +669,7 @@ function createMockHub(opts) {
     if (st.record.take) { r.take = st.record.take; r.path = '/mock/takes/' + st.record.take; }
     return r;
   };
-  const helloMsg = () => ({ t: 'hello', sync: Object.assign({}, st.sync), dests: allDests(), remaps: st.remaps.map(r => Object.assign({}, r)), sample_rate: sr, osc: Object.assign({}, MOCK_OSC, { ips: MOCK_OSC.ips.slice() }), record: recordMsg() });
+  const helloMsg = () => ({ t: 'hello', sync: Object.assign({}, st.sync), dests: allDests(), remaps: st.remaps.map(r => Object.assign({}, r)), sample_rate: sr, osc: Object.assign({}, MOCK_OSC, { ips: MOCK_OSC.ips.slice() }), ...(o.replay ? {} : { record: recordMsg() }) });
   const allDests = () => st.dests.concat(questPresent ? [{ name: 'quest', kind: 'device', follow: st.questFollow }] : []).map(d => Object.assign({}, d));
   // MIDI/clock signals are hub-made (out, like the real hub's generated
   // ones); device and /ext/ OSC arrives on :9000 (in).
@@ -780,7 +786,7 @@ function createMockHub(opts) {
       // like the hub: a second start while on is refused; every change re-sends hello
       case 'record_start':
         if ('name' in m && typeof m.name !== 'string') errors.push('record_start: name must be a string');
-        if (!st.record.on) st.record = { on: true, since: lastUs, take: '2026-10-20T21-14-03' + (m.name ? '-' + m.name.replace(/[^A-Za-z0-9_-]/g, '-') : '') };
+        if (!st.record.on && !o.replay) st.record = { on: true, since: lastUs, take: '2026-10-20T21-14-03' + (m.name ? '-' + m.name.replace(/[^A-Za-z0-9_-]/g, '-') : '') };
         out.push(helloMsg()); return;
       case 'record_stop': st.record.on = false; out.push(helloMsg()); return;
     }
@@ -846,9 +852,10 @@ function onHubText(text) {
   else if (t === 'link') renderLink();
 }
 function latestLink() { return S.links.length ? S.links[S.links.length - 1] : null; }
+// No `record` in hello (a replaying hub): no Record button at all.
 function renderRecord() {
   const r = S.record, b = $('#rec'), info = $('#recinfo');
-  b.hidden = !r;
+  $('#recgrp').hidden = !r;
   if (!r) { info.textContent = ''; return; }
   b.classList.toggle('on', r.on);
   b.textContent = r.on ? '■ Stop' : '● Record';
@@ -901,7 +908,7 @@ let connJustOpened = false;
 function setConn(state, text) { connState = state; const p = $('#conn'); p.className = 'pill ' + (state === 'open' ? (MOCK ? 'mock' : 'ok') : 'bad'); p.textContent = text; }
 
 function connectMock() {
-  const hub = L.createMockHub({ leadMs: Number(params.get('lead') || 70), oscLeadMs: Number(params.get('osclead') || 40), peers: params.has('peers') ? Number(params.get('peers')) : 3, joinMs: params.has('join') ? Number(params.get('join')) : null });
+  const hub = L.createMockHub({ leadMs: Number(params.get('lead') || 70), oscLeadMs: Number(params.get('osclead') || 40), peers: params.has('peers') ? Number(params.get('peers')) : 3, joinMs: params.has('join') ? Number(params.get('join')) : null, replay: params.has('replay') });
   conn = { send: (txt) => hub.onMessage(JSON.parse(txt)) };
   S.freshConnection = true; connJustOpened = true;
   setConn('open', 'MOCK hub (lead ' + hub.opts.leadMs + ' ms)');

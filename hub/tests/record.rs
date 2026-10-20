@@ -119,3 +119,41 @@ fn the_record_button_starts_a_take_mid_run_seeded_with_the_current_state() {
     drop(hub);
     let _ = std::fs::remove_dir_all(&takes);
 }
+
+/// `simply-tussen replay` starts the console with no recorder: `hello`
+/// carries no `record` (the page shows no Record button) and
+/// `record_start` is refused.
+#[test]
+fn a_replaying_hub_offers_no_record_button_and_refuses_record_start() {
+    let (console, _router_side) = console::start_with_record(
+        ConsoleOptions {
+            port: 0,
+            osc_port: 9000,
+            config: None,
+            statics: vec![],
+            sample_rate: 48000,
+            state: SyncState::default(),
+        },
+        None,
+    )
+    .unwrap();
+    let mut page = connect(console.addr, "/ws");
+    let first = hello_frame(&mut page);
+    assert!(first.get("record").is_none(), "no record state: {first}");
+    send(&mut page, json!({"t": "record_start", "name": "nope"}));
+    let after = hello_frame(&mut page);
+    assert!(after.get("record").is_none(), "still none after record_start: {after}");
+}
+
+fn hello_frame(ws: &mut Ws) -> Json {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        if let Ok(tungstenite::Message::Text(t)) = ws.read() {
+            let v: Json = serde_json::from_str(t.as_str()).unwrap();
+            if v["t"] == "hello" {
+                return v;
+            }
+        }
+    }
+    panic!("no hello");
+}

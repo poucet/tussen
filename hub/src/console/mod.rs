@@ -573,7 +573,8 @@ impl ConsoleHub {
                             log::warn!("console: recording not started: {e:#}");
                         }
                     }
-                    None => log::warn!("console: this hub cannot record (replaying)"),
+                    // `simply-tussen replay`: no recorder, the page shows no button.
+                    None => log::warn!("console: record_start refused: a replaying hub does not record"),
                 }
                 self.broadcast(self.hello());
             }

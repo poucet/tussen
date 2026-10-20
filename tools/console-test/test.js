@@ -398,6 +398,15 @@ section('Link');
     ok(!recs[3].on && recs[3].take === recs[1].take && r.S.record && !r.S.record.on, 'record_stop: off, the last take still named');
     ok(r.hub.errors.length === 0, 'mock saw no protocol errors (record)', r.hub.errors);
   }
+  { // a replaying hub: no record in hello (no Record button), record_start refused, link carries replay
+    const r = runMock({ replay: true }, 3, (hub, el) => { if (el === 990e3) hub.onMessage(L.msg.recordStart('nope')); });
+    const hellos = r.msgs.filter(m => m.t === 'hello');
+    ok(hellos.length === 2 && hellos.every(m => !('record' in m)), 'replaying: hello never carries record, before or after record_start', hellos.map(m => m.record));
+    ok(r.S.record === null, 'replaying: the page has no record state (no button)');
+    const lk = r.msgs.filter(m => m.t === 'link').pop();
+    ok(lk.replay && lk.replay.take && Array.isArray(lk.replay.loop) && r.S.replay && /^REPLAY /.test(L.replayLabel(r.S.replay)), 'replaying: link carries replay', lk.replay);
+    ok(r.hub.errors.length === 0, 'mock saw no protocol errors (replay)', r.hub.errors);
+  }
   ok(L.replayLabel({ take: 'T-rehearsal', bar: 10.34, bars: 24, loop: [9, 17] }) === 'REPLAY T-rehearsal · bar 10.3/24 · loop 9–17' && L.replayLabel({ take: 't', bar: 1, bars: 3 }) === 'REPLAY t · bar 1.0/3' && L.replayLabel(null) === '', 'replayLabel');
   ok(L.linkLabel({ mode: 'joined', peers: 2 }) === 'Link 2 peers' && L.linkLabel({ mode: 'started', peers: 1 }) === 'Link 1 peer' && L.linkLabel({ mode: 'waiting', peers: 0 }) === 'Link: waiting' && L.linkLabel(null) === 'no Link', 'linkLabel');
   ok(/joins the first one it hears/.test(L.linkModeNote({ mode: 'waiting' })) && /stays until the hub stops/.test(L.linkModeNote({ mode: 'started' })) && /waits again/.test(L.linkModeNote({ mode: 'joined' })), 'linkModeNote says the rule');

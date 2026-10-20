@@ -64,7 +64,9 @@ Link timeline. A replay from its start then sees a consistent world.
   `NAME`. Stop it from the console, or stop the hub.
 - Takes are named by their UTC start time, plus the name if given:
   `2026-10-20T21-14-03-rehearsal`.
-- A replaying hub can't record. The Record button is hidden there.
+- **A replaying hub doesn't record.** During `simply-tussen replay` the
+  console shows no Record button at all, and a `record_start` sent over
+  the websocket is refused.
 
 ## Replaying
 
