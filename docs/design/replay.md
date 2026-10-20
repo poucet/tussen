@@ -21,6 +21,8 @@ Claims carry □ (follows from the code or arithmetic), ◇ (possible or measure
 
 ## As built (2026-10-20)
 
+User guide: [docs/guides/record-and-replay.md](../guides/record-and-replay.md). This doc stays the design record.
+
 - **Recording**: the console's **Record** button (top bar; elapsed time and take name while on) at any time, over `record_start` / `record_stop`, its state in `hello.record`. A take started mid-run is seeded at t = 0 with the last value of every non-event address the router has routed (with its source) and the current Link timeline. `run --record [NAME]` starts one at launch. A replaying hub cannot record.
 - **Replay is its own command** (settled, superseding D10's "flags on `run`"): `simply-tussen replay <take|latest|path> [--loop A..B] [--from BAR] [--offset-ms N] [--replay-link lead|off] [--config …] [--takes-dir DIR]`. It runs `run`'s startup (one shared path in `cmd/run.rs`), with the take as the sources. `./simply-tussen replay` opens the console as `run` does. `--loop` is whole bars, from bar A's first beat to bar B's; `--offset-ms` is a manual audio nudge, default 0 (D6: no lead). `simply-tussen takes` lists takes.
 - **Streams recorded**: OSC, MIDI and pad (all at `route`, with origin), audio (the RTP sender's blocks, packet stamps as anchors), the Link timeline (tempo, beat, start/stop, mode, quantum, from the link thread), the signal delay. Not NDI.

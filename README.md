@@ -142,23 +142,17 @@ copies the example there first, then uses that file).
 
 ## Record and replay
 
-Press **● Record** in the console's top bar while the hub runs; **■ Stop**
-ends the take. (`run --record [NAME]` starts one at launch.)
+Press **● Record** in the console's top bar to record a take (every
+signal, the audio and the Link timeline); then, with nobody performing:
 
 ```sh
 ./simply-tussen takes                          # name, length, size
 ./simply-tussen replay latest --loop 9..17     # loop bars 9–17, as if live
 ```
 
-A take (in `~/.local/share/tussen/takes/`) holds every signal the hub
-routed, the audio it streamed, the Link timeline and the sync state, and
-starts with the last value of every address at the press. `replay` serves
-the same hub as `run`, fed from the take: consumers see the same
-addresses, RTP stream and clock as live;
-the take leads the Link session (`--replay-link off` leaves it alone);
-loops are whole bars and restore state at every seam. How-to:
-[docs/guides/setup.md § Record and replay](docs/guides/setup.md#record-and-replay);
-design: [docs/design/replay.md](docs/design/replay.md).
+Consumers see a replay as live, the take leads the Link session, and the
+sync delays apply as set, so it can drive TouchDesigner and the devices
+end to end. Guide: [docs/guides/record-and-replay.md](docs/guides/record-and-replay.md).
 
 ## Reading the signals from your own code
 

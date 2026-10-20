@@ -242,75 +242,19 @@ tick *keep* to send the original too. `*` matches one path segment. Save.
 
 ## Record and replay
 
-Record a rehearsal once, then work on the visuals against it without the
-band: the hub plays the take back as if it were live. Every consumer gets
-the same addresses, the same RTP stream and the same `/tussen/clock/…`, and
-Link apps (TouchDesigner's Link CHOP, Ableton) follow the replay's beat.
-
-1. With the hub running (`./simply-tussen run`), press **● Record** in the
-   console's top bar. It turns into **■ Stop**, with the elapsed time and
-   the take's name beside it. Press Stop when the part you want is done.
-   (`./simply-tussen run --record rehearsal` starts recording at launch.)
-2. Quit the hub, then:
+Record a rehearsal with **● Record** in the console's top bar (■ Stop
+ends the take), then work on the visuals against it without the band:
 
 ```sh
-./simply-tussen takes                              # what's recorded
-./simply-tussen replay latest                      # loop the whole take
-./simply-tussen replay latest --loop 9..17         # loop bars 9 to 17
-./simply-tussen replay rehearsal --from 13         # by name, from bar 13
+./simply-tussen takes
+./simply-tussen replay latest --loop 9..17
 ```
 
-`replay` starts the same hub as `run` (same config, destinations, devices,
-RTP and console, which opens in the browser), fed from the take.
-
-- **What a take holds**: every signal the hub routed (OSC, MIDI, pad,
-  each with its arrival time and source), the audio it streamed, the Link
-  timeline (tempo, beat, start/stop) and the sync state. A take starts
-  with the last value of every address at the moment Record was pressed,
-  so a replay from its start sees the world as it was. NDI never passes
-  the hub, so it is not in a take. Takes live in
-  `~/.local/share/tussen/takes/` (`$XDG_DATA_HOME/tussen/takes/`;
-  `--takes-dir` picks another). A take stays valid if the hub is killed:
-  it holds everything up to its last flush (a quarter of a second).
-- **Replaying replaces the hub's own sources**: its MIDI, pad, audio
-  capture and Link are off; the take's play instead. OSC from the network
-  still merges, so a device you test with works as usual. Recorded hellos
-  are never replayed: no phantom devices.
-- **Loops are whole bars** of the recorded Link timeline: `--loop 9..17`
-  plays from bar 9's first beat to bar 17's, and `--from 13` starts at bar
-  13. At each seam the hub sends the last value of every address as it was
-  at the loop start (held notes, knobs), never re-fires events (`…/press`,
-  `onbeat`), and keeps the beat counting up in the same bar phase. The whole
-  take loops onto the next bar line, with less than a bar of silence.
-- **Link**: with nobody else in a session the replay founds one at the
-  take's tempo; otherwise it joins, proposes the take's tempo, and lines
-  the take up with that session's bars. Tempo changes in the take are
-  proposed as they come. `--replay-link off` leaves Link alone (then read
-  the beat from `/tussen/clock/…`).
-- **A replay is what entered the hub, at the times it entered.** The
-  audio plays at its recorded time relative to the signals (the mixer's
-  latency is already in it), and both sync points apply as live, so TD
-  and the devices get everything lined up as at the venue.
-  `--offset-ms <n>` nudges the audio n ms ahead (negative: later).
-- The console's top bar says `REPLAY <take> · bar x/y · loop a–b`, and its
-  OSC feed marks replayed signals `src: "replay"`.
-
-### Test the visual path with a replay
-
-No band, no DJs, no live audio: a replay drives TouchDesigner live, TD
-sends its NDI to the devices as usual, and the devices composite it. NDI
-itself is never recorded (it doesn't pass the hub); TD makes it fresh.
-
-1. Use the room's config (`hub.toml` with the `td` destination, its
-   `rtp_port`, and the sync points set at soundcheck).
-2. `./simply-tussen replay latest --loop 9..17` on the hub laptop.
-3. TD: Link CHOP on (it follows the replay's session), the audio input on
-   the RTP stream as at a show, the OSC In as at a show. Its NDI goes to
-   the devices.
-4. Open the devices. They register, get the replayed signals and audio
-   with both sync points applied, and composite TD's NDI.
-5. Judge the alignment on a device exactly as in *Soundcheck* above. The
-   loop repeats the same bars, so there's time to adjust the round trip.
+A replay runs the room's hub as live, fed from the take: TouchDesigner
+gets the replayed OSC, RTP audio and Link, sends its NDI to the devices as
+usual, and both sync delays apply, so the whole visual path can be tested
+with no performers. Everything else (flags, timing, loops, Link, what a
+take holds): [record-and-replay.md](record-and-replay.md).
 
 ## If something's off
 

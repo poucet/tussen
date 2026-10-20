@@ -35,6 +35,7 @@
 - `simply-tussen takes` lists takes; the console's top bar shows
   `REPLAY <take> · bar x/y · loop a–b`; the `link` frame gains `replay`,
   `hello` gains `record`, and the page sends `record_start` / `record_stop`.
+- User guide: [docs/guides/record-and-replay.md](docs/guides/record-and-replay.md).
 
 #### The binary is `simply-tussen` · 2026-10-20 00:29 · rpklqlnu
 
