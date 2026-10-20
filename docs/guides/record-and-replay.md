@@ -121,6 +121,50 @@ stays in phase. The audio fades over 5 ms at each seam.
   show did. You can still adjust them in the console during a replay.
 - `--offset-ms` is there if you want to nudge the audio by hand.
 
+## Hearing a replay
+
+The hub has no speakers of its own. A local output is a **destination**:
+add one to the hub config and the hub's audio stream plays on that
+device, in `replay` (the take) and in `run` (the live capture, say on
+headphones) alike.
+
+```toml
+[[dest]]
+name = "speakers"
+audio_out = ""                       # this machine's default output
+# audio_out = "MacBook Pro Speakers" # or a name from `simply-tussen list` (a unique part works)
+```
+
+- An `audio_out` destination has no OSC (no `host`, `port` or
+  `subscribe`). The shipped hub.toml has one commented out.
+- The startup lists it with the other destinations:
+  `dest speakers → audio out "MacBook Pro Speakers" (44100 Hz), kind engine`.
+  An output that can't be opened is a warning, not a stop: the hub runs
+  without it.
+- During `run` it can't be the output `[audio] device` taps (the default
+  output, with `device = ""`): it would capture itself, so the hub refuses.
+
+**It gets what any RTP consumer gets.** Inside the hub it is an RTP
+receiver on loopback, fed the same stream through the same delay ring as
+the devices. Loops and seams sound exactly as they do on the RTP stream.
+Its `kind` picks the delay, by the same rule as every other consumer's
+audio:
+
+| `kind` | audio delay |
+|---|---|
+| `engine` (default) | none: the room, hearing the music as it entered the hub |
+| `device` | the TD round trip (unless `[sync.device.<name>] follow = "music"`), in time with the devices' picture |
+| `td` | none (TouchDesigner's audio is never delayed) |
+
+The output plays once 20 ms has arrived (its jitter buffer), so it runs
+about 20 ms plus the device's own buffer behind the stream. If the device's
+clock drifts and more than 80 ms piles up, it skips back to 20 ms.
+
+**Rate and channels.** A device at another rate (44.1 kHz, 96 kHz) gets the
+stream resampled linearly. That's fine for monitoring, not for a master.
+Stereo plays to the first two channels of a multichannel device, and is
+averaged onto a mono one.
+
 ## Link
 
 During a replay the hub **leads** the Link session with the take's

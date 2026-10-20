@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+#### Local audio outputs: hear the hub's stream on this machine · 2026-10-20 02:25 · rzozrrmk
+
+- **A `[[dest]]` with `audio_out = "<device>"`** (`""` = the default output;
+  a name from `simply-tussen list`, or a unique part of one) plays the
+  hub's audio stream on a local device: hear a replay in the room, or
+  monitor the live capture on headphones during `run`. It needs no OSC
+  fields. The startup lists it as
+  `dest speakers → audio out "<device>" (<rate> Hz), kind engine`. A
+  device that won't open is a warning, not a stop. During `run` the hub
+  refuses the output `[audio]` taps, which would capture itself.
+- It is an ordinary RTP consumer: an in-process receiver on loopback, fed
+  the same stream through the same delay ring as the devices, so replay
+  loops and seams sound as on RTP. Its `kind` sets the delay by the usual
+  rule. `engine` (the default) is undelayed, the room; `device` is held back
+  by the TD round trip.
+- Inside: packets are put back in order (a lost one plays as silence),
+  playback starts once 20 ms is queued, it skips back to 20 ms if device
+  clock drift piles up more than 80 ms, it resamples linearly to the device
+  rate, and it maps stereo to the device's channels. Device selection uses
+  audiowatch's `simply-audio-device`; the stream is cpal 0.18.
+
 #### Record a rehearsal, replay it as if live · 2026-10-20 01:09 · zwoqsnyk (first: 2026-10-20 00:59 · zxuvnzuw)
 
 - **● Record in the console's top bar** starts a take at any time; ■ Stop
