@@ -61,7 +61,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
 #hist td.v,#seen td.v{text-align:right;font-variant-numeric:tabular-nums}
 #histpause.on{color:var(--acc)}
 #linkgrp{position:relative}
-#rec{font-weight:bold}#rec.on{background:#8b2626;color:#fff;border-color:#c33}
+#rec{font-weight:bold}#rec:disabled{opacity:.45;cursor:not-allowed}#rec.on{background:#8b2626;color:#fff;border-color:#c33}
 #recinfo{color:#f66;font-variant-numeric:tabular-nums}#recinfo.err{color:#e9a}
 #replayst{background:#8b2626;color:#fff;padding:1px 7px;border-radius:9px;font-variant-numeric:tabular-nums}
 #linkst{cursor:pointer;border-bottom:1px dotted var(--dim)}#linkst:hover{color:#fff}
@@ -79,7 +79,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
   <button id="pause" title="Space">⏸ pause</button>
   <span>window <input id="win" type="number" min="50" max="10000" step="10" value="2000"> ms</span>
   <span>gain <input id="gain" type="number" min="0.25" max="64" step="0.25" value="1"></span>
-  <span id="recgrp" hidden><button id="rec" title="record a take: every signal, the audio and the Link timeline, from now until Stop (simply-tussen replay plays it back)">● Record</button> <span id="recinfo"></span></span>
+  <span id="recgrp" hidden><button id="rec" data-title="record a take: every signal, the audio and the Link timeline, from now until Stop (simply-tussen replay plays it back)">● Record</button> <span id="recinfo"></span></span>
   <span id="replayst" hidden title="the hub is replaying a take (simply-tussen replay): every signal and the audio come from it"></span>
   <span id="linkgrp" title="Ableton Link: the hub joins the session it hears, or waits with a beat of its own; the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="who is in the Link session — click for the list">no Link</span><div id="peerdrop" role="dialog" aria-label="Link peers"></div> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button> <button id="linkstart" hidden title="found a Link session now, at this tempo — for when nobody else will join">⊕ start session</button></span>
   <span id="readout" class="dim">—</span>
@@ -361,7 +361,7 @@ function linkLabel(l) {
 // hello's `record`, stamped with the local ms it arrived at (for the running clock).
 function normRecord(r, localMs) {
   if (!r || typeof r !== 'object') return null;
-  return { on: !!r.on, take: r.take ? String(r.take) : '', elapsedMs: Number(r.elapsed_ms) || 0, atMs: localMs, error: r.error ? String(r.error) : '' };
+  return { on: !!r.on, take: r.take ? String(r.take) : '', elapsedMs: Number(r.elapsed_ms) || 0, atMs: localMs, error: r.error ? String(r.error) : '', off: r.off ? String(r.off) : '' };
 }
 // The text beside the Record button: `● REC 1:05 · <take>` while on.
 function recordLabel(r, nowMs) {
@@ -608,8 +608,8 @@ function createMockHub(opts) {
   // peers: how many Link peers it hears (0 = the hub waits); joinMs: with
   // peers 0, three peers in a session at joinBpm appear that long after
   // start, and the hub joins them.
-  // replay: behave like `simply-tussen replay` — no record in hello,
-  // record_start refused, link frames carry `replay`.
+  // replay: behave like `simply-tussen replay` — recording switched off
+  // (record.off; record_start refused), link frames carry `replay`.
   const o = Object.assign({ bpm: 120, leadMs: 70, oscLeadMs: 40, sampleRate: 48000, peers: 3, joinMs: null, joinBpm: 126, replay: false }, opts || {});
   const beatUs = 60e6 / o.bpm, bd = blockDurUs(o.sampleRate), sr = o.sampleRate;
   const kickOffsetUs = 250e3;      // first kick 250 ms after start
@@ -667,9 +667,10 @@ function createMockHub(opts) {
   const recordMsg = () => {
     const r = { on: st.record.on, elapsed_ms: st.record.on ? Math.round((lastUs - st.record.since) / 1000) : 0 };
     if (st.record.take) { r.take = st.record.take; r.path = '/mock/takes/' + st.record.take; }
+    if (o.replay) r.off = 'recording is off during replay';
     return r;
   };
-  const helloMsg = () => ({ t: 'hello', sync: Object.assign({}, st.sync), dests: allDests(), remaps: st.remaps.map(r => Object.assign({}, r)), sample_rate: sr, osc: Object.assign({}, MOCK_OSC, { ips: MOCK_OSC.ips.slice() }), ...(o.replay ? {} : { record: recordMsg() }) });
+  const helloMsg = () => ({ t: 'hello', sync: Object.assign({}, st.sync), dests: allDests(), remaps: st.remaps.map(r => Object.assign({}, r)), sample_rate: sr, osc: Object.assign({}, MOCK_OSC, { ips: MOCK_OSC.ips.slice() }), record: recordMsg() });
   const allDests = () => st.dests.concat(questPresent ? [{ name: 'quest', kind: 'device', follow: st.questFollow }] : []).map(d => Object.assign({}, d));
   // MIDI/clock signals are hub-made (out, like the real hub's generated
   // ones); device and /ext/ OSC arrives on :9000 (in).
@@ -852,17 +853,20 @@ function onHubText(text) {
   else if (t === 'link') renderLink();
 }
 function latestLink() { return S.links.length ? S.links[S.links.length - 1] : null; }
-// No `record` in hello (a replaying hub): no Record button at all.
+// The Record button: shown whenever hello carries `record`; disabled, with
+// the hub's reason as tooltip, when recording is switched off (a replay).
 function renderRecord() {
   const r = S.record, b = $('#rec'), info = $('#recinfo');
   $('#recgrp').hidden = !r;
   if (!r) { info.textContent = ''; return; }
+  b.disabled = !!r.off;
+  b.title = r.off || b.dataset.title;
   b.classList.toggle('on', r.on);
   b.textContent = r.on ? '■ Stop' : '● Record';
-  info.className = r.error && !r.on ? 'err' : '';
-  info.textContent = r.on ? L.recordLabel(r, performance.now()) : (r.error ? 'not recording: ' + r.error : '');
+  info.className = r.error && !r.on && !r.off ? 'err' : '';
+  info.textContent = r.on ? L.recordLabel(r, performance.now()) : (r.error && !r.off ? 'not recording: ' + r.error : '');
 }
-$('#rec').onclick = () => { if (S.record) sendNow(S.record.on ? L.msg.recordStop() : L.msg.recordStart()); };
+$('#rec').onclick = () => { if (S.record && !S.record.off) sendNow(S.record.on ? L.msg.recordStop() : L.msg.recordStart()); };
 setInterval(renderRecord, 250);
 function renderLink() {
   const live = L.linkLive(S, performance.now()), l = latestLink(), n = $('#bpm'), p = $('#play');

@@ -45,9 +45,10 @@ and when recording starts or stops.
 
 `record` is the Record button's state: `on`, the take being written (or the
 last one, after a stop), how long it has been recording when the frame was
-made, and `error` if the last start failed. It is absent when the hub
-cannot record (`simply-tussen replay`): the console then shows no Record
-button, and `record_start` is refused. A full-access client starts and
+made, and `error` if the last start failed. `off` is set when recording is
+switched off on this hub, saying why (`simply-tussen replay`: "recording is
+off during replay"): the console shows the button disabled with that as its
+tooltip, and `record_start` is refused. A full-access client starts and
 stops takes with `{"t":"record_start"}` (optional `"name"`) and
 `{"t":"record_stop"}`; every change re-sends `hello`.
 

@@ -51,6 +51,10 @@ pub struct Status {
     /// Why the last start failed, if it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Set when recording is switched off on this hub (a replay), saying
+    /// why: the console shows the button disabled with this as its tooltip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub off: Option<String>,
 }
 
 /// Starts and stops takes into `dir`.
@@ -61,6 +65,7 @@ pub struct Control {
     slot: Slot,
     audio: Option<Arc<AudioLink>>,
     last: Mutex<(Option<PathBuf>, Option<String>)>,
+    off: Option<String>,
 }
 
 impl Control {
@@ -75,7 +80,17 @@ impl Control {
             slot: Arc::new(Mutex::new(None)),
             audio,
             last: Mutex::new((None, None)),
+            off: None,
         })
+    }
+
+    /// The same control with recording switched off, saying why (a replay:
+    /// "recording is off during replay"). Everything else is wired as live,
+    /// so layering a recording over a replay later is dropping this call.
+    pub fn switched_off(dir: Option<PathBuf>, meta: Meta, audio: Option<Arc<AudioLink>>, why: &str) -> Arc<Control> {
+        let mut c = Arc::into_inner(Control::new(dir, meta, None, audio)).expect("fresh");
+        c.off = Some(why.to_owned());
+        Arc::new(c)
     }
 
     pub fn slot(&self) -> Slot {
@@ -84,6 +99,9 @@ impl Control {
 
     /// Start a new take now. Refused while one is being written.
     pub fn start(&self, name: Option<&str>) -> anyhow::Result<Arc<Recorder>> {
+        if let Some(why) = &self.off {
+            anyhow::bail!("{why}");
+        }
         let result = self.try_start(name);
         self.last.lock().unwrap().1 = result.as_ref().err().map(|e| format!("{e:#}"));
         result
@@ -136,6 +154,7 @@ impl Control {
             path: path.map(|p| p.display().to_string()),
             elapsed_ms: rec.map_or(0, |r| Instant::now().saturating_duration_since(r.start_instant()).as_millis() as u64),
             error: last.1.clone(),
+            off: self.off.clone(),
         }
     }
 }
@@ -164,6 +183,10 @@ mod tests {
         assert!(audio.rec.lock().unwrap().is_none());
         assert!(!c.status().on && c.status().take.is_some(), "the last take is still named");
         assert_eq!(c.stop(), None);
+        let off = Control::switched_off(Some(dir.clone()), Meta::default(), None, "recording is off during replay");
+        assert_eq!(off.start(None).err().unwrap().to_string(), "recording is off during replay");
+        let s = off.status();
+        assert!(!s.on && s.off.as_deref() == Some("recording is off during replay") && s.error.is_none(), "{s:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

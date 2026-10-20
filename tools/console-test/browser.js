@@ -248,10 +248,15 @@ let ch = null;
   await sleep(400);
   ok(/Record/.test(await ev("document.querySelector('#rec').textContent")) && await ev("document.querySelector('#recinfo').textContent") === '', 'Stop: back to Record, the clock goes');
   ok(await ev("document.querySelector('#replayst').hidden"), 'live: no REPLAY label');
-  // A replaying hub: no Record button at all, the REPLAY label instead.
+  ok(!(await ev("document.querySelector('#rec').disabled")), 'live: Record enabled');
+  // A replaying hub: the Record button stays, greyed out, and clicks do nothing.
   await cdp('Page.navigate', { url: page + '&replay=1' });
   await sleep(1500);
-  ok(await ev("document.querySelector('#recgrp').hidden && document.querySelector('#recgrp').offsetParent === null"), 'replaying: no Record button');
+  ok(await ev("!document.querySelector('#recgrp').hidden && document.querySelector('#rec').offsetParent !== null"), 'replaying: the Record button is still there');
+  ok(await ev("document.querySelector('#rec').disabled") && await ev("document.querySelector('#rec').title") === 'recording is off during replay', 'replaying: disabled, saying why');
+  await ev("document.querySelector('#rec').click()");
+  await sleep(400);
+  ok(/Record/.test(await ev("document.querySelector('#rec').textContent")) && await ev("document.querySelector('#recinfo').textContent") === '', 'replaying: a click records nothing');
   ok(/^REPLAY 2026-10-20T21-14-03-rehearsal · bar \d+\.\d\/24 · loop 9–17$/.test(await ev("document.querySelector('#replayst').textContent")) && !(await ev("document.querySelector('#replayst').hidden")), 'replaying: the REPLAY label', await ev("document.querySelector('#replayst').textContent"));
   const shotRp = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: 120, scale: 1 } });
   fs.writeFileSync(path.join(shotDir, 'console-replaying.png'), Buffer.from(shotRp.result.data, 'base64'));

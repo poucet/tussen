@@ -62,9 +62,9 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
         Sources::Live { .. } => None,
     };
     let audio_link = Arc::new(AudioLink::default());
-    // Recording on demand (console Record, `run --record`); a replay is
-    // not recorded.
-    let recording = replaying.is_none().then(|| {
+    // Recording on demand (console Record, `run --record`). A replay has
+    // it wired the same way but switched off: the button shows, disabled.
+    let recording = Some({
         let meta = take::Meta {
             sample_rate: config.audio.sample_rate,
             channels: config.audio.channels,
@@ -73,7 +73,15 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
             signal_delay_ms: config.sync.signal_delay_ms,
             ..take::Meta::default()
         };
-        record::Control::new(takes_dir.clone(), meta, config_text.clone(), Some(Arc::clone(&audio_link)))
+        match replaying {
+            None => record::Control::new(takes_dir.clone(), meta, config_text.clone(), Some(Arc::clone(&audio_link))),
+            Some(_) => record::Control::switched_off(
+                takes_dir.clone(),
+                meta,
+                Some(Arc::clone(&audio_link)),
+                "recording is off during replay",
+            ),
+        }
     });
 
     // The hub console: loopback only. A port in use is logged

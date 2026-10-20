@@ -120,11 +120,14 @@ fn the_record_button_starts_a_take_mid_run_seeded_with_the_current_state() {
     let _ = std::fs::remove_dir_all(&takes);
 }
 
-/// `simply-tussen replay` starts the console with no recorder: `hello`
-/// carries no `record` (the page shows no Record button) and
-/// `record_start` is refused.
+/// `simply-tussen replay` wires recording as live but switches it off:
+/// `hello.record` says why (the page shows the button, disabled) and
+/// `record_start` is refused — no take is made.
 #[test]
-fn a_replaying_hub_offers_no_record_button_and_refuses_record_start() {
+fn a_replaying_hub_shows_record_switched_off_and_refuses_record_start() {
+    let takes = std::env::temp_dir().join(format!("tussen-record-off-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&takes);
+    let off = record::Control::switched_off(Some(takes.clone()), Meta::default(), None, "recording is off during replay");
     let (console, _router_side) = console::start_with_record(
         ConsoleOptions {
             port: 0,
@@ -134,15 +137,15 @@ fn a_replaying_hub_offers_no_record_button_and_refuses_record_start() {
             sample_rate: 48000,
             state: SyncState::default(),
         },
-        None,
+        Some(off),
     )
     .unwrap();
     let mut page = connect(console.addr, "/ws");
-    let first = hello_frame(&mut page);
-    assert!(first.get("record").is_none(), "no record state: {first}");
+    let want = json!({"on": false, "elapsed_ms": 0, "off": "recording is off during replay"});
+    assert_eq!(hello_frame(&mut page)["record"], want);
     send(&mut page, json!({"t": "record_start", "name": "nope"}));
-    let after = hello_frame(&mut page);
-    assert!(after.get("record").is_none(), "still none after record_start: {after}");
+    assert_eq!(hello_frame(&mut page)["record"], want, "refused, and nothing changed");
+    assert!(!takes.exists(), "no take was made");
 }
 
 fn hello_frame(ws: &mut Ws) -> Json {

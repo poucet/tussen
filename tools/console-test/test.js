@@ -398,11 +398,12 @@ section('Link');
     ok(!recs[3].on && recs[3].take === recs[1].take && r.S.record && !r.S.record.on, 'record_stop: off, the last take still named');
     ok(r.hub.errors.length === 0, 'mock saw no protocol errors (record)', r.hub.errors);
   }
-  { // a replaying hub: no record in hello (no Record button), record_start refused, link carries replay
+  { // a replaying hub: recording switched off (button shown, disabled), record_start refused, link carries replay
     const r = runMock({ replay: true }, 3, (hub, el) => { if (el === 990e3) hub.onMessage(L.msg.recordStart('nope')); });
     const hellos = r.msgs.filter(m => m.t === 'hello');
-    ok(hellos.length === 2 && hellos.every(m => !('record' in m)), 'replaying: hello never carries record, before or after record_start', hellos.map(m => m.record));
-    ok(r.S.record === null, 'replaying: the page has no record state (no button)');
+    ok(hellos.length === 2 && hellos.every(m => m.record && m.record.on === false && m.record.off === 'recording is off during replay'), 'replaying: hello carries record switched off, before and after record_start', hellos.map(m => m.record));
+    ok(r.S.record && r.S.record.off === 'recording is off during replay' && !r.S.record.on, 'replaying: the page keeps the button, switched off');
+    ok(L.normRecord({ on: false, elapsed_ms: 0 }, 0).off === '', 'live: not switched off');
     const lk = r.msgs.filter(m => m.t === 'link').pop();
     ok(lk.replay && lk.replay.take && Array.isArray(lk.replay.loop) && r.S.replay && /^REPLAY /.test(L.replayLabel(r.S.replay)), 'replaying: link carries replay', lk.replay);
     ok(r.hub.errors.length === 0, 'mock saw no protocol errors (replay)', r.hub.errors);
