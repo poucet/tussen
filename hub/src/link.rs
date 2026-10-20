@@ -12,7 +12,7 @@
 //! ([`Mode::Joined`]) as the newcomer, at that session's tempo and beat;
 //! nobody else changes anything.
 //!
-//! (A replay — `run --replay`, [`crate::replay`] — is the exception: this
+//! (A replay — `simply-tussen replay`, [`crate::replay`] — is the exception: this
 //! generator does not run, and the replay leads the session with the
 //! take's timeline.)
 //!

@@ -247,16 +247,27 @@ band: the hub plays the take back as if it were live. Every consumer gets
 the same addresses, the same RTP stream and the same `/tussen/clock/…`, and
 Link apps (TouchDesigner's Link CHOP, Ableton) follow the replay's beat.
 
+1. With the hub running (`./simply-tussen run`), press **● Record** in the
+   console's top bar. It turns into **■ Stop**, with the elapsed time and
+   the take's name beside it. Press Stop when the part you want is done.
+   (`./simply-tussen run --record rehearsal` starts recording at launch.)
+2. Quit the hub, then:
+
 ```sh
-./simply-tussen run --record rehearsal          # record until Ctrl-C
-./simply-tussen takes                           # what's recorded
-./simply-tussen run --replay latest             # loop the whole take
-./simply-tussen run --replay latest --loop 9..17   # loop bars 9 to 17
+./simply-tussen takes                              # what's recorded
+./simply-tussen replay latest                      # loop the whole take
+./simply-tussen replay latest --loop 9..17         # loop bars 9 to 17
+./simply-tussen replay rehearsal --from 13         # by name, from bar 13
 ```
+
+`replay` starts the same hub as `run` (same config, destinations, devices,
+RTP and console, which opens in the browser), fed from the take.
 
 - **What a take holds**: every signal the hub routed (OSC, MIDI, pad,
   each with its arrival time and source), the audio it streamed, the Link
-  timeline (tempo, beat, start/stop) and the sync state. NDI never passes
+  timeline (tempo, beat, start/stop) and the sync state. A take starts
+  with the last value of every address at the moment Record was pressed,
+  so a replay from its start sees the world as it was. NDI never passes
   the hub, so it is not in a take. Takes live in
   `~/.local/share/tussen/takes/` (`$XDG_DATA_HOME/tussen/takes/`;
   `--takes-dir` picks another). A take stays valid if the hub is killed:
@@ -280,7 +291,7 @@ Link apps (TouchDesigner's Link CHOP, Ableton) follow the replay's beat.
   mixer with no latency, so the music lands on the beat it was played on
   and the console's alignment strip reads 0. If the venue folded the
   visuals' own audio path into the signal delay, the audio comes 30–50 ms
-  early: `--audio-lead-ms <n>` sets the lead for one run.
+  early: `--offset-ms <n>` sets the lead for one replay.
 - The console's top bar says `REPLAY <take> · bar x/y · loop a–b`, and its
   OSC feed marks replayed signals `src: "replay"`.
 

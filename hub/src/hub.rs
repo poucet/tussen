@@ -96,13 +96,13 @@ pub struct Extras {
     pub console: Option<RouterConsole>,
 }
 
-/// What `run --record` / `run --replay` attach to the router.
+/// What recording and `simply-tussen replay` attach to the router.
 #[derive(Default)]
 pub struct Takes {
     /// Recording on demand ([`crate::record`]): while the slot holds a
     /// recorder, every routed message and sync change goes into it.
     pub record: Option<Slot>,
-    /// `run --replay`: the replay's signals, routed as [`Src::Replay`].
+    /// `simply-tussen replay`: the replay's signals, routed as [`Src::Replay`].
     pub replay: Option<Receiver<Message>>,
 }
 

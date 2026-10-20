@@ -2,16 +2,19 @@
 
 ## Unreleased
 
-#### Record a rehearsal, replay it as if live · 2026-10-20 00:59 · zxuvnzuw
+#### Record a rehearsal, replay it as if live · 2026-10-20 01:09 · zwoqsnyk (first: 2026-10-20 00:59 · zxuvnzuw)
 
-- **`simply-tussen run --record [NAME]`** writes a take into
+- **● Record in the console's top bar** starts a take at any time; ■ Stop
+  ends it (elapsed time and take name show while on). A take goes into
   `~/.local/share/tussen/takes/<UTC time>[-name]/` (`$XDG_DATA_HOME`,
   `--takes-dir`): every signal the hub routed (OSC, MIDI, pad, with time and
   source), the audio it streamed as a WAV, the Link timeline and the sync
-  state, plus a copy of the config. Valid after every flush, so a killed hub
-  loses at most a quarter of a second. The start banner shows the path.
-- **`simply-tussen run --replay <take|latest>`** plays it back through the
-  router, looping: same addresses, same RTP stream (one SSRC, continuous
+  state, plus a copy of the config. It starts with the last value of every
+  address at the press. Valid after every flush, so a killed hub loses at
+  most a quarter of a second. `run --record [NAME]` starts one at launch.
+- **`simply-tussen replay <take|latest>`** starts the same hub as `run`
+  (`./simply-tussen replay` opens the console too), fed from the take,
+  looping: same addresses, same RTP stream (one SSRC, continuous
   sequence), same `/tussen/clock/…`. Consumers change nothing; the console
   marks replayed signals `src: "replay"`. The hub's own MIDI, pad, capture
   and Link are off while replaying; network OSC still merges; recorded
@@ -25,9 +28,10 @@
   address, lets go of notes not held at the loop start, never re-fires
   events, and keeps the beat counting up in phase.
 - Audio plays the take's final signal delay ahead of the signals (no mixer
-  in a replay); `--audio-lead-ms` overrides it.
+  in a replay); `--offset-ms` overrides it.
 - `simply-tussen takes` lists takes; the console's top bar shows
-  `REPLAY <take> · bar x/y · loop a–b`; the `link` frame gains `replay`.
+  `REPLAY <take> · bar x/y · loop a–b`; the `link` frame gains `replay`,
+  `hello` gains `record`, and the page sends `record_start` / `record_stop`.
 
 #### The binary is `simply-tussen` · 2026-10-20 00:29 · rpklqlnu
 

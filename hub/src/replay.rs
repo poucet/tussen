@@ -1,4 +1,4 @@
-//! `run --replay <take>`: a take played back through the router as if
+//! `simply-tussen replay <take>`: a take played back through the router as if
 //! live (design: `docs/design/replay.md`).
 //!
 //! A replay is a generator. Its **event thread** sleeps to each recorded
@@ -31,7 +31,7 @@
 //! events (`…/press`, `onbeat`, …) are never re-fired.
 //!
 //! **Audio lead (D6)**: recorded audio plays `signal_delay_ms` (the value
-//! at the end of the take, or `--audio-lead-ms`) earlier than the signals,
+//! at the end of the take, or `--offset-ms`) earlier than the signals,
 //! as if the rig had a zero-latency mixer.
 
 use std::collections::HashMap;
@@ -58,7 +58,7 @@ pub enum LinkMode {
     Off,
 }
 
-/// What `run --replay` was asked for.
+/// What `simply-tussen replay` was asked for.
 #[derive(Clone, Debug)]
 pub struct Options {
     /// Loop bars `a..b`: from bar a's first beat to bar b's (1-based).

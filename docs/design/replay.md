@@ -13,7 +13,7 @@
 7. **Crash-safe by construction**: no footer, no index at close. Ctrl-C while tapping already exits without destructors (`hold()`), so a take is valid at every flush.
 8. **Iteration is a bar-aligned A–B loop** that replays the state at A on every pass, so a shader sees a consistent world each time.
 9. **Link** (settled: built with S1): while replaying, the hub **leads** the local Link session with the take's timeline. It founds a session if none exists, and otherwise places the take on that session's bar grid and proposes the take's tempo. TD's Link CHOP and Ableton follow. `--replay-link off` leaves Link alone.
-10. **Built for the hackathon**: `simply-tussen run --record [NAME]`, then `simply-tussen run --replay <take|latest> [--loop A..B] [--from BAR]` loops in real time.
+10. **Built for the hackathon**: the console's Record button (or `run --record [NAME]` at launch), then `simply-tussen replay <take|latest> [--loop A..B] [--from BAR]` loops in real time.
 11. **NDI is out**: the hub never carries it, so a take cannot hold it.
 
 Numbers, measurements and prior art: [docs/research/replay-numbers.md](../research/replay-numbers.md).
@@ -21,7 +21,8 @@ Claims carry □ (follows from the code or arithmetic), ◇ (possible or measure
 
 ## As built (2026-10-20)
 
-- **Commands**: `run --record [NAME]` · `run --replay <take|latest|path>` · `--loop A..B` (whole bars, from bar A's first beat to bar B's) · `--from BAR` · `--audio-lead-ms N` · `--replay-link lead|off` · `--takes-dir DIR` · `simply-tussen takes`. `--record` with `--replay` is refused.
+- **Recording**: the console's **Record** button (top bar; elapsed time and take name while on) at any time, over `record_start` / `record_stop`, its state in `hello.record`. A take started mid-run is seeded at t = 0 with the last value of every non-event address the router has routed (with its source) and the current Link timeline. `run --record [NAME]` starts one at launch. A replaying hub cannot record.
+- **Replay is its own command** (settled, superseding D10's "flags on `run`"): `simply-tussen replay <take|latest|path> [--loop A..B] [--from BAR] [--offset-ms N] [--replay-link lead|off] [--config …] [--takes-dir DIR]`. It runs `run`'s startup (one shared path in `cmd/run.rs`), with the take as the sources. `./simply-tussen replay` opens the console as `run` does. `--loop` is whole bars, from bar A's first beat to bar B's; `--offset-ms` is the audio lead override (Q3). `simply-tussen takes` lists takes.
 - **Streams recorded**: OSC, MIDI and pad (all at `route`, with origin), audio (the RTP sender's blocks, packet stamps as anchors), the Link timeline (tempo, beat, start/stop, mode, quantum, from the link thread), the signal delay. Not NDI.
 - **Code**: `hub/src/take.rs` (format, writer, reader), `hub/src/replay.rs` (grid, plan, event thread, audio pacer, Link lead), the `route` tap and `Src::{Net, Hub, Replay}` in `hub/src/hub.rs`, the audio tap in `generators/audio/mod.rs`, the timeline tap in `link.rs`.
 - **Tests**: `hub/tests/replay.rs` (a synthetic session recorded and replayed with timing, audio and tempo checks; a take cut mid-write; a bar loop with state restore; Link lead founding and joining with simply-link peers), unit tests in `take.rs` and `replay.rs`.
@@ -43,7 +44,7 @@ Ranked by how much each one changes. The ids are stable so review comments can c
 | D7 | Loop semantics (§6.1) | **Whole bars from the recorded timeline**; the beat keeps counting up across the seam; 5 ms audio crossfade | phase continuity for every beat consumer |
 | D8 | State on seek and loop (§6.2) | **Restore the last value of every non-event address** at the target, plus note-offs; events (`…/press`, `onbeat`, `tap`, `recenter`) never re-fired | a consistent world after a jump; needs an event list |
 | D11 | Recorded hellos and byes (§4.1) | **Recorded, never replayed** | no phantom devices at a venue's IP addresses |
-| D10 | How a replay is started (§7) | **Flags on `run`** (`--record`, `--replay <take>`), so `./tussen --replay latest` works; console controls from S3 | one process, one config, one console |
+| D10 | How a replay is started (§7) | **Settled otherwise: `simply-tussen replay <take>`**, its own command over `run`'s startup; recording from the console's Record button (pulled forward from S3), `run --record` as a launch shortcut | one config, one console; replay and live never share a process |
 | D9 | Where takes live (§3.1) | **`$XDG_DATA_HOME/tussen/takes/`**, else `~/.local/share/tussen/takes/`, on macOS too; `--takes-dir` and `[replay] dir` override | mirrors the config's XDG choice |
 | D12 | Playback rate (§6.3) | **1.0 only** until a later stage; varispeed (audio pitched) is the first step beyond | keeps audio and OSC trivially in step |
 
@@ -51,7 +52,7 @@ Ranked by how much each one changes. The ids are stable so review comments can c
 
 1. **Must TD's Link CHOP follow a replay at the hackathon?** Yes: Link lead is built with S1 (D5).
 2. **May a replay drive a room with live Link peers?** Leading is the default while replaying; `--replay-link off` is the way out.
-3. **Is the audio lead (D6) right?** D6 as recommended, with a per-take override: `--audio-lead-ms`.
+3. **Is the audio lead (D6) right?** D6 as recommended, with a per-take override: `replay --offset-ms`.
 4. **Live pads over a replay** (S5): later.
 5. **Always-on recording** (S7): later.
 

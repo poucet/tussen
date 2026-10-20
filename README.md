@@ -21,10 +21,10 @@ An OSC/MIDI/audio hub for live performance. One Rust process that:
 - **aligns it all**: two sync delays hold OSC/MIDI back so control signals,
   the beat and the returning music arrive together — set live, by ear or by
   eye, on the built-in console;
-- **records and replays** — `run --record` keeps every signal, the audio
-  and the Link timeline as a take; `run --replay latest --loop 9..17` plays
-  it back as if live, leading Link, so the visuals can be built without the
-  band.
+- **records and replays** — the console's Record button keeps every
+  signal, the audio and the Link timeline as a take;
+  `simply-tussen replay latest --loop 9..17` plays it back as if live,
+  leading Link, so the visuals can be built without the band.
 
 Built to drive visual rigs (shaders, TouchDesigner, browser pages) from the
 same signals the musicians play; bring any OSC consumer.
@@ -142,15 +142,19 @@ copies the example there first, then uses that file).
 
 ## Record and replay
 
+Press **● Record** in the console's top bar while the hub runs; **■ Stop**
+ends the take. (`run --record [NAME]` starts one at launch.)
+
 ```sh
-./simply-tussen run --record rehearsal            # until Ctrl-C
-./simply-tussen takes                             # name, length, size
-./simply-tussen run --replay latest --loop 9..17  # loop bars 9–17, as if live
+./simply-tussen takes                          # name, length, size
+./simply-tussen replay latest --loop 9..17     # loop bars 9–17, as if live
 ```
 
 A take (in `~/.local/share/tussen/takes/`) holds every signal the hub
-routed, the audio it streamed, the Link timeline and the sync state. On
-replay, consumers see the same addresses, RTP stream and clock as live;
+routed, the audio it streamed, the Link timeline and the sync state, and
+starts with the last value of every address at the press. `replay` serves
+the same hub as `run`, fed from the take: consumers see the same
+addresses, RTP stream and clock as live;
 the take leads the Link session (`--replay-link off` leaves it alone);
 loops are whole bars and restore state at every seam. How-to:
 [docs/guides/setup.md § Record and replay](docs/guides/setup.md#record-and-replay);

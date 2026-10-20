@@ -29,7 +29,8 @@ slow consumers are dropped frames rather than allowed to stall the hub.
 
 ## First frame: `hello`
 
-Sent on connect, and re-sent to everyone after any sync/follow/remap change.
+Sent on connect, and re-sent to everyone after any sync/follow/remap change
+and when recording starts or stops.
 
 ```json
 { "t": "hello",
@@ -38,8 +39,16 @@ Sent on connect, and re-sent to everyone after any sync/follow/remap change.
              { "name": "quest", "kind": "device", "follow": "td" } ],
   "remaps": [ { "id": 3, "dest": "td", "from": "/a/*", "to": "/b", "range": [0, 2], "keep": true } ],
   "sample_rate": 48000,
-  "osc":   { "port": 9000, "ips": ["192.0.2.2"], "hostname": "hub.local" } }
+  "osc":   { "port": 9000, "ips": ["192.0.2.2"], "hostname": "hub.local" },
+  "record": { "on": true, "take": "2026-10-20T21-14-03-rehearsal", "path": "…", "elapsed_ms": 4210 } }
 ```
+
+`record` is the Record button's state: `on`, the take being written (or the
+last one, after a stop), how long it has been recording when the frame was
+made, and `error` if the last start failed. It is absent when the hub
+cannot record (`simply-tussen replay`). A full-access client starts and
+stops takes with `{"t":"record_start"}` (optional `"name"`) and
+`{"t":"record_stop"}`; every change re-sends `hello`.
 
 `osc` is where OSC *senders* should aim (the console's copy button);
 `hostname` is absent when unknown, `ips` empty on a routeless machine.
@@ -67,7 +76,7 @@ epoch for all frames — deltas are meaningful, the absolute value is not).
 
 | frame | shape | when |
 |---|---|---|
-| `osc` | `{"t":"osc","ts":…,"addr":"/ext/x","v":0.5,"src":"127.0.0.1:5000"}` | per message, as routed — watched addresses only; hub-made signals (`/tussen/clock/…`, `/tussen/pad/…`) carry `"src":"hub"`, signals played from a take (`run --replay`) `"src":"replay"` |
+| `osc` | `{"t":"osc","ts":…,"addr":"/ext/x","v":0.5,"src":"127.0.0.1:5000"}` | per message, as routed — watched addresses only; hub-made signals (`/tussen/clock/…`, `/tussen/pad/…`) carry `"src":"hub"`, signals played from a take (`simply-tussen replay`) `"src":"replay"` |
 | `midi` | `{"t":"midi","ts":…,"addr":"/tussen/midi/cc/74","v":0.5}` | per MIDI-derived signal, always (no watch needed) |
 | `addrs` | `{"t":"addrs","list":[{"addr":"/ext/x","last_ts":…,"rate":2.5,"v":0.5,"min":0,"max":1,"count":12,"dir":"in"}]}` | ~2 Hz; every address since hub start, sorted, permanent; `dir` ∈ `in`/`out`/`both` |
 | `link` | `{"t":"link","ts":…,"beat":2.5,"bpm":120,"quantum":4,"playing":true,"mode":"joined","peers":1,"peer_list":[…]}` | ~4 Hz and on Link status change; `mode` is `waiting` (in no session; the beat is the hub's own), `joined` or `started` (from the console); `peers` counts the others in the hub's session, `peer_list` is every peer heard (below); while replaying a take, also `"replay":{"take":"…","bar":9.5,"bars":24,"loop":[9,17]}` (`loop` only with `--loop`) |
