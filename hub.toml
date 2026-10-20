@@ -61,6 +61,7 @@ rtp_port = 5006
 # [[dest]]
 # name = "speakers"
 # audio_out = ""
+# modes = ["replay"]  # the default for an audio_out: live, the room already hears it
 
 # The audio the hub streams to the visuals destination and the devices. Any
 # name `simply-tussen list` prints: a device with inputs is read, an output-only

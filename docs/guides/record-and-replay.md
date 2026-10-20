@@ -125,15 +125,30 @@ stays in phase. The audio fades over 5 ms at each seam.
 
 The hub has no speakers of its own. A local output is a **destination**:
 add one to the hub config and the hub's audio stream plays on that
-device, in `replay` (the take) and in `run` (the live capture, say on
-headphones) alike.
+device. By default only in `replay`: live, the room already hears the
+music, and playing it again doubles it and can feed back.
 
 ```toml
 [[dest]]
 name = "speakers"
 audio_out = ""                       # this machine's default output
 # audio_out = "MacBook Pro Speakers" # or a name from `simply-tussen list` (a unique part works)
+modes = ["replay"]                   # the default for an audio_out
 ```
+
+**`modes` says when a destination exists.** Any `[[dest]]` takes
+`modes = ["run", "replay"]`, a list of the modes it is active in.
+
+- Without `modes`, a network destination (`host`/`port`) is active in
+  every mode, and an `audio_out` one in `replay` only.
+- Set it to change that: `modes = ["run"]` monitors the live capture on
+  headphones, `modes = ["run", "replay"]` plays in both.
+- `"mesh"` is accepted and reserved: there is no mesh mode yet, so it
+  never activates. Any other value is a config error naming the
+  destination.
+- An inactive destination is not created at all: no socket, no RTP, no
+  device opened, not in the console. The startup lists it as skipped:
+  `dest speakers → audio out "" — replay only, inactive in run`.
 
 - An `audio_out` destination has no OSC (no `host`, `port` or
   `subscribe`). The shipped hub.toml has one commented out.

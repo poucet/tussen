@@ -113,7 +113,7 @@ commented. The short version:
 | Section | What |
 |---|---|
 | `[osc]` | the listen port (:9000), packet cap, device timeout |
-| `[[dest]]` | a static destination: `name`, `host`, `port`, `subscribe`/`exclude` prefixes, optional `rtp_port` for the audio stream; or `audio_out = "<device>"` (no OSC fields) to play the audio stream on a local output |
+| `[[dest]]` | a static destination: `name`, `host`, `port`, `subscribe`/`exclude` prefixes, optional `rtp_port` for the audio stream; or `audio_out = "<device>"` (no OSC fields) to play the audio stream on a local output; optional `modes` (`run`, `replay`; default: all for a network dest, `["replay"]` for an `audio_out`) |
 | `[audio]` | the capture: `""` = default output (tapped), or a device name from `simply-tussen list` |
 | `[midi]` | MIDI inputs (`"*"` = all) and the refresh cadence |
 | `[pad]` | game controllers on this machine (`enabled`, name filters, refresh) |
@@ -153,8 +153,9 @@ signal, the audio and the Link timeline); then, with nobody performing:
 Consumers see a replay as live, the take leads the Link session, and the
 sync delays apply as set, so it can drive TouchDesigner and the devices
 end to end. To hear it, add a local output destination to hub.toml
-(`[[dest]]` with `audio_out = ""` for the default output; it works during
-`run` too).
+(`[[dest]]` with `audio_out = ""` for the default output). It plays in
+`replay` only unless its `modes` says otherwise (`modes = ["run"]` for
+live headphones).
 Guide: [docs/guides/record-and-replay.md](docs/guides/record-and-replay.md).
 
 ## Reading the signals from your own code

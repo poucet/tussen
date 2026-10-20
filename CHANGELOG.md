@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+#### Destinations say which modes they're active in · 2026-10-20 02:40 · molpnvrq
+
+- **`modes = ["run", "replay"]` on any `[[dest]]`.** Without it, a
+  network destination is active in every mode (as before) and an
+  `audio_out` one in **`replay` only**: live, the room already hears the
+  music, and playing it again doubles it and can feed back.
+  `modes = ["run"]` monitors live on headphones. `"mesh"` is accepted and
+  reserved (no mesh mode yet, so it never activates); any other value is a
+  config error naming the destination.
+- An inactive destination is not created: no socket, no RTP, no device
+  opened, absent from the console. The startup lists it as
+  `dest speakers → audio out "" — replay only, inactive in run`.
+
 #### Local audio outputs: hear the hub's stream on this machine · 2026-10-20 02:25 · rzozrrmk
 
 - **A `[[dest]]` with `audio_out = "<device>"`** (`""` = the default output;

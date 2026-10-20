@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tussen_hub::audio_out;
-use tussen_hub::config::Config;
+use tussen_hub::config::{Config, Mode};
 use tussen_hub::config_file::ConfigFile;
 use tussen_hub::console::{self, ConsoleOptions};
 use tussen_hub::generators::audio::{self, AudioGenerator, AudioLink, OutputTarget};
@@ -46,6 +46,17 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
     if let Sources::Live { audio_device: Some(device), .. } = &sources {
         config.audio.device = device.clone();
     }
+    // A destination inactive in this mode is never created: router,
+    // RTP, audio outputs and console all see only the active ones.
+    let mode = match &sources {
+        Sources::Live { .. } => Mode::Run,
+        Sources::Replay { .. } => Mode::Replay,
+    };
+    let skipped_lines: Vec<String> = config
+        .retain_active(mode)
+        .iter()
+        .map(|d| format!("dest {} → {} — {}, inactive in {}", d.name, d.target_shown(), d.modes_shown(), mode.as_str()))
+        .collect();
     log::info!(
         "simply-tussen: OSC on :{}, {} static destination(s), max packet {} B",
         config.osc.listen_port,
@@ -54,6 +65,9 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
     );
     for d in config.dests.iter().filter(|d| d.has_osc()) {
         log::info!("  dest {} → {}:{} subscribe={:?} exclude={:?}", d.name, d.host, d.port, d.subscribe, d.exclude);
+    }
+    for line in &skipped_lines {
+        log::info!("  {line}");
     }
     let replaying = match &sources {
         Sources::Replay { take: which, .. } => {
@@ -196,7 +210,7 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
     extras.audio = Some(audio_link);
     let hub = hub::spawn_with_takes(config, rx, !stats, extras, takes_io)?;
     let osc_port = hub.addr().port();
-    let extra: Vec<String> = doing.into_iter().chain(output_lines).collect();
+    let extra: Vec<String> = doing.into_iter().chain(output_lines).chain(skipped_lines).collect();
     print!("{}", banner(console_at, osc_port, &console::osc_endpoint(osc_port).ips, &config_shown, &extra));
     use std::io::Write;
     let _ = std::io::stdout().flush();

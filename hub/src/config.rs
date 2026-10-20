@@ -134,6 +134,33 @@ pub struct DestConfig {
     /// consumer, delayed as its kind says ([`crate::sync::SyncState::audio_delay_ms`]).
     #[serde(default)]
     pub audio_out: Option<String>,
+    /// The modes it is active in: `run`, `replay` (`mesh` is reserved and
+    /// never activates yet). Absent: every mode for a network destination,
+    /// `replay` only for an `audio_out` one (live, the room already hears
+    /// the music). Inactive = not created: no socket, no RTP, no device.
+    #[serde(default)]
+    pub modes: Option<Vec<String>>,
+}
+
+/// What the hub is doing: which destinations exist depends on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Run,
+    Replay,
+    /// Reserved: accepted in `modes`, but no mode is `Mesh` yet.
+    Mesh,
+}
+
+impl Mode {
+    pub const ALL: [Mode; 3] = [Mode::Run, Mode::Replay, Mode::Mesh];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Mode::Run => "run",
+            Mode::Replay => "replay",
+            Mode::Mesh => "mesh",
+        }
+    }
 }
 
 impl DestConfig {
@@ -147,6 +174,37 @@ impl DestConfig {
     /// Whether the router sends it OSC (it has a port).
     pub fn has_osc(&self) -> bool {
         self.port != 0
+    }
+
+    /// The modes it is active in, defaults applied (see `modes`).
+    pub fn modes(&self) -> Vec<Mode> {
+        match (&self.modes, &self.audio_out) {
+            (Some(m), _) => Mode::ALL.into_iter().filter(|x| m.iter().any(|s| s == x.as_str())).collect(),
+            (None, Some(_)) => vec![Mode::Replay],
+            (None, None) => Mode::ALL.to_vec(),
+        }
+    }
+
+    pub fn active_in(&self, mode: Mode) -> bool {
+        self.modes().contains(&mode)
+    }
+
+    /// `replay only`, `run + replay`, …: for the startup's skipped line.
+    pub fn modes_shown(&self) -> String {
+        let m: Vec<&str> = self.modes().into_iter().map(Mode::as_str).collect();
+        match m.len() {
+            0 => "no mode".to_owned(),
+            1 => format!("{} only", m[0]),
+            _ => m.join(" + "),
+        }
+    }
+
+    /// Where it goes, as the startup shows it.
+    pub fn target_shown(&self) -> String {
+        match &self.audio_out {
+            Some(out) => format!("audio out {out:?}"),
+            None => format!("{}:{}", self.host, self.port),
+        }
     }
 }
 
@@ -166,8 +224,23 @@ impl Config {
                 "{origin}: destination {:?} has neither a port (OSC) nor an audio_out",
                 d.name
             );
+            for m in d.modes.iter().flatten() {
+                anyhow::ensure!(
+                    Mode::ALL.iter().any(|x| x.as_str() == m),
+                    "{origin}: destination {:?}: unknown mode {m:?} in `modes` (run | replay | mesh)",
+                    d.name
+                );
+            }
         }
         Ok(config)
+    }
+
+    /// Keep only the destinations active in `mode`; returns the skipped
+    /// ones. Done before the hub starts, so a skipped one is never created.
+    pub fn retain_active(&mut self, mode: Mode) -> Vec<DestConfig> {
+        let (on, off) = std::mem::take(&mut self.dests).into_iter().partition(|d| d.active_in(mode));
+        self.dests = on;
+        off
     }
 
     /// The config `file` names — its text, or the built-in example's.
@@ -214,6 +287,7 @@ mod tests {
         let out: Config = toml::from_str(&example).expect("the commented audio_out destination parses");
         assert_eq!(out.dests[0].audio_out.as_deref(), Some(""));
         assert_eq!(out.dests[0].kind(), DestKind::Engine);
+        assert_eq!(out.dests[0].modes(), [Mode::Replay]);
     }
 
     #[test]
@@ -227,6 +301,55 @@ mod tests {
         assert_eq!(c.dests[0].kind(), crate::sync::DestKind::Device);
         let e = Config::parse("[[dest]]\nname = \"x\"\n", "t").unwrap_err().to_string();
         assert!(e.contains("neither a port"), "{e}");
+    }
+
+    #[test]
+    fn modes_default_by_destination_type_and_explicit_wins() {
+        let c = Config::parse(
+            r#"
+            [[dest]]
+            name = "td"
+            port = 7000
+            [[dest]]
+            name = "speakers"
+            audio_out = ""
+            [[dest]]
+            name = "phones"
+            audio_out = "Head"
+            modes = ["run"]
+            [[dest]]
+            name = "later"
+            port = 7001
+            modes = ["mesh"]
+            "#,
+            "t",
+        )
+        .unwrap();
+        let modes: Vec<Vec<Mode>> = c.dests.iter().map(DestConfig::modes).collect();
+        assert_eq!(modes, [Mode::ALL.to_vec(), vec![Mode::Replay], vec![Mode::Run], vec![Mode::Mesh]]);
+        assert_eq!(c.dests[1].modes_shown(), "replay only");
+        assert_eq!(c.dests[0].modes_shown(), "run + replay + mesh");
+        let e = Config::parse("[[dest]]\nname = \"spk\"\naudio_out = \"\"\nmodes = [\"live\"]\n", "t")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("\"spk\"") && e.contains("unknown mode \"live\""), "{e}");
+    }
+
+    #[test]
+    fn run_and_replay_keep_only_their_active_destinations() {
+        let text = "[[dest]]\nname = \"td\"\nport = 7000\n[[dest]]\nname = \"speakers\"\naudio_out = \"\"\n\
+                    [[dest]]\nname = \"phones\"\naudio_out = \"\"\nmodes = [\"run\"]\n";
+        let names = |c: &Config| c.dests.iter().map(|d| d.name.clone()).collect::<Vec<_>>();
+        let mut run = Config::parse(text, "t").unwrap();
+        let skipped = run.retain_active(Mode::Run);
+        assert_eq!(names(&run), ["td", "phones"]);
+        assert_eq!(skipped.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["speakers"]);
+        let mut replay = Config::parse(text, "t").unwrap();
+        replay.retain_active(Mode::Replay);
+        assert_eq!(names(&replay), ["td", "speakers"]);
+        let mut mesh = Config::parse(text, "t").unwrap();
+        mesh.retain_active(Mode::Mesh);
+        assert_eq!(names(&mesh), ["td"]);
     }
 
     #[test]
