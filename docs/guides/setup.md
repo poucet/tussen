@@ -287,12 +287,11 @@ RTP and console, which opens in the browser), fed from the take.
   the take up with that session's bars. Tempo changes in the take are
   proposed as they come. `--replay-link off` leaves Link alone (then read
   the beat from `/tussen/clock/…`).
-- **Both sync points apply as live.** The take's audio plays early by the
-  take's signal delay minus this config's: on the rig that recorded it,
-  not at all, so TD and the devices get everything exactly as they did
-  live. On a laptop with no signal delay, by the whole recorded delay (as
-  if the mixer had no latency). `--offset-ms <n>` sets it for one replay
-  (negative: the audio comes later).
+- **A replay is what entered the hub, at the times it entered.** The
+  audio plays at its recorded time relative to the signals (the mixer's
+  latency is already in it), and both sync points apply as live, so TD
+  and the devices get everything lined up as at the venue.
+  `--offset-ms <n>` nudges the audio n ms ahead (negative: later).
 - The console's top bar says `REPLAY <take> · bar x/y · loop a–b`, and its
   OSC feed marks replayed signals `src: "replay"`.
 

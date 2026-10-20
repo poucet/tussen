@@ -113,8 +113,7 @@ fn replay(take: Take, opts: Options, audio: bool) -> (Device, replay::Replay, hu
     replay_with(config(), take, opts, audio)
 }
 
-fn replay_with(config: Config, take: Take, mut opts: Options, audio: bool) -> (Device, replay::Replay, hub::Hub, Arc<AudioLink>) {
-    opts.signal_delay_ms = config.sync.signal_delay_ms;
+fn replay_with(config: Config, take: Take, opts: Options, audio: bool) -> (Device, replay::Replay, hub::Hub, Arc<AudioLink>) {
     let cfg = config.audio.clone();
     let link = Arc::new(AudioLink::default());
     let (rtx, rrx) = crossbeam_channel::bounded(4096);
@@ -429,13 +428,14 @@ fn a_replay_leads_a_session_it_finds_on_that_sessions_bar_grid() {
 /// signals and audio still meet at TD, and at the device as TD's NDI does.
 #[test]
 fn a_replay_drives_td_and_a_device_through_both_sync_points() {
-    // The take: a hit at 1.0 s; its music, through a mixer 60 ms late, in
-    // the audio at 1.06 s; recorded with the signal delay tuned to 60 ms.
+    // The take: a hit entering the hub at 1.0 s; its music, through a mixer
+    // 60 ms late, entering at 1.06 s. The signal delay in force while
+    // recording (25 ms here) plays no part: replay is ingress-faithful.
     let dir = tmp("visual");
     let rec = Recorder::start(&dir, meta(), None).unwrap();
     let t0 = rec.start_instant();
     let at = |us: u64| t0 + Duration::from_micros(us);
-    rec.sync(t0, 60, 40);
+    rec.sync(t0, 25, 40);
     rec.link(t0, 120.0, 0.0, true, 0, 4.0);
     let mut tap = rec.audio_tap(512);
     let packet_us = 256.0 * 1e6 / 48000.0;
@@ -451,7 +451,7 @@ fn a_replay_drives_td_and_a_device_through_both_sync_points() {
     let take = Take::open(&dir).unwrap();
     assert!(take.frames >= 375 * 256 - 256, "{} frames", take.frames);
 
-    // The same rig, sync points unchanged: 60 ms signal delay, 40 ms round trip.
+    // The rig, tuned to the mixer: 60 ms signal delay, 40 ms round trip.
     let td_osc = Listener::bind("127.0.0.1:0").unwrap();
     let td_rtp = UdpSocket::bind("127.0.0.1:0").unwrap();
     td_rtp.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
@@ -507,7 +507,7 @@ fn a_replay_drives_td_and_a_device_through_both_sync_points() {
     let dev_hit = dev.osc("/ext/hit")[0].0;
     let dev_click = dev.rtp.lock().unwrap().iter().find(|p| p.1.samples.iter().any(|s| *s > 0.5)).expect("the device got the audio").0;
 
-    // At TD: the hit (delayed 60 ms) and its music (as recorded) together.
+    // At TD: the hit (delayed 60 ms) and its music (at its recorded time) together.
     let at_td = signed_ms(td_click, td_hit);
     assert!(at_td.abs() < 8.0, "at TD the music lands {at_td:.1} ms from its hit");
     // At the device: both 40 ms behind TD, together.

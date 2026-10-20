@@ -9,7 +9,7 @@
 3. **Replayed at ingress**: a replay is a **generator**. It feeds the recorded signals back into the router and the recorded audio into the existing RTP sender. Remaps, sync points, subscriptions and late-registering devices all work unchanged.
 4. **Consumers change nothing**: same addresses, same RTP stream (one SSRC, continuous sequence), same `/tussen/clock/…`. The websocket's `src` says `"replay"`. That is the one visible mark.
 5. **One clock**: everything the hub stamps is `Instant`, which on macOS is `mach_absolute_time`. Takes store µs since take start.
-6. **The sync points apply unchanged during a replay**, and the recorded audio plays `D_rec − D_now` early (the take's final signal delay minus the replaying hub's). On the rig that recorded it that is 0: audio, signals and their delays reach TD and the devices exactly as live (D6, settled as option c, §2.3). On a rig with no delay it is the whole recorded delay, as if the mixer had no latency.
+6. **A replay is the hub's ingress, reproduced**: audio at its recorded packet stamps, signals at their recorded arrival, no lead (D6). The rig's sync points apply unchanged and align them as they did live.
 7. **Crash-safe by construction**: no footer, no index at close. Ctrl-C while tapping already exits without destructors (`hold()`), so a take is valid at every flush.
 8. **Iteration is a bar-aligned A–B loop** that replays the state at A on every pass, so a shader sees a consistent world each time.
 9. **Link** (settled: built with S1): while replaying, the hub **leads** the local Link session with the take's timeline. It founds a session if none exists, and otherwise places the take on that session's bar grid and proposes the take's tempo. TD's Link CHOP and Ableton follow. `--replay-link off` leaves Link alone.
@@ -22,7 +22,7 @@ Claims carry □ (follows from the code or arithmetic), ◇ (possible or measure
 ## As built (2026-10-20)
 
 - **Recording**: the console's **Record** button (top bar; elapsed time and take name while on) at any time, over `record_start` / `record_stop`, its state in `hello.record`. A take started mid-run is seeded at t = 0 with the last value of every non-event address the router has routed (with its source) and the current Link timeline. `run --record [NAME]` starts one at launch. A replaying hub cannot record.
-- **Replay is its own command** (settled, superseding D10's "flags on `run`"): `simply-tussen replay <take|latest|path> [--loop A..B] [--from BAR] [--offset-ms N] [--replay-link lead|off] [--config …] [--takes-dir DIR]`. It runs `run`'s startup (one shared path in `cmd/run.rs`), with the take as the sources. `./simply-tussen replay` opens the console as `run` does. `--loop` is whole bars, from bar A's first beat to bar B's; `--offset-ms` is the audio lead override (Q3). `simply-tussen takes` lists takes.
+- **Replay is its own command** (settled, superseding D10's "flags on `run`"): `simply-tussen replay <take|latest|path> [--loop A..B] [--from BAR] [--offset-ms N] [--replay-link lead|off] [--config …] [--takes-dir DIR]`. It runs `run`'s startup (one shared path in `cmd/run.rs`), with the take as the sources. `./simply-tussen replay` opens the console as `run` does. `--loop` is whole bars, from bar A's first beat to bar B's; `--offset-ms` is a manual audio nudge, default 0 (D6: no lead). `simply-tussen takes` lists takes.
 - **Streams recorded**: OSC, MIDI and pad (all at `route`, with origin), audio (the RTP sender's blocks, packet stamps as anchors), the Link timeline (tempo, beat, start/stop, mode, quantum, from the link thread), the signal delay. Not NDI.
 - **Code**: `hub/src/take.rs` (format, writer, reader), `hub/src/replay.rs` (grid, plan, event thread, audio pacer, Link lead), the `route` tap and `Src::{Net, Hub, Replay}` in `hub/src/hub.rs`, the audio tap in `generators/audio/mod.rs`, the timeline tap in `link.rs`.
 - **Tests**: `hub/tests/replay.rs` (a synthetic session recorded and replayed with timing, audio and tempo checks; a take cut mid-write; a bar loop with state restore; Link lead founding and joining with simply-link peers), unit tests in `take.rs` and `replay.rs`.
@@ -37,7 +37,7 @@ Ranked by how much each one changes. The ids are stable so review comments can c
 |---|---|---|---|
 | D5 | Link during replay (§5) | **Settled: the replay leads Link from S1.** Found a session if none exists (overriding waiting while replaying), propose the take's tempo and every recorded tempo change, place the take on the session's bar grid at the start and at every seam; `--replay-link off` leaves Link alone. `/tussen/clock/…` comes from the same timeline | TD's Link CHOP and Ableton follow a replay; contradicts "the hub never imposes a tempo" while replaying (§12) |
 | D1 | Where to record (§1) | **Ingress**, in `Loop::route` (+ `RouterCmd::Sync`), audio at the sender's packetization, Link state in the link thread. Not egress per destination | replay re-uses router, remaps and sync points; a take is not a forensic record of what each consumer got |
-| D6 | How audio and OSC line up on replay (§2.3) | **Settled (reconciled 2026-10-20): audio lead = `D_rec − D_now`** (option c). The sync points apply unchanged, so a replay drives TD and the devices exactly as live and the NDI coming back from TD lines up; on a rig with no delay this is option b. `replay --offset-ms` overrides | the visual path can be tested end to end with a replay (§4.3) |
+| D6 | How audio and OSC line up on replay (§2.3) | **Settled: ingress-faithful, no lead.** Audio plays at its recorded packet stamp relative to the signals' recorded arrival; the rig's sync points align them as live. `replay --offset-ms` is a manual nudge, default 0 | a replay drives TD and the devices with live timing, so the visual path lines up as at the venue (§4.3) |
 | D2 | Timebase (§2.1, §2.2) | **One host clock (`Instant`), µs since take start; audio timed by its RTP packet stamps** plus `(frame, τ)` anchors, not by capture stamps | replay reproduces what live consumers got; capture stamps stay the mesh's concern |
 | D4 | Live inputs during replay (§4.2) | **S1: live network OSC merges; the hub's own generators (capture, MIDI, pad, Link) are replaced by the take.** S5: per-prefix *claims* decide, so a performer can play pads over a recorded set | what a shader dev can do live while a take plays |
 | D3 | Event log format (§3.2) | **Our own length-prefixed binary log** (raw OSC bytes, µs, origin), index rebuilt by scanning on open; `take dump` to NDJSON. MCAP as the considered alternative | a dependency vs. ~150 lines; tooling (Foxglove) vs. none |
@@ -52,9 +52,9 @@ Ranked by how much each one changes. The ids are stable so review comments can c
 
 1. **Must TD's Link CHOP follow a replay at the hackathon?** Yes: Link lead is built with S1 (D5).
 2. **May a replay drive a room with live Link peers?** Leading is the default while replaying; `--replay-link off` is the way out.
-3. **Is the audio lead (D6) right?** D6 with a per-take override, `replay --offset-ms`; reconciled to option c (`D_rec − D_now`) when the sync points had to apply unchanged for testing the visual path (§2.3, §4.3).
-4. **Live pads over a replay** (S5): later.
-5. **Always-on recording** (S7): later.
+3. **Live pads over a replay** (S5): later.
+4. **Always-on recording** (S7): later.
+5. **The audio lead (D6)**: none. Replay is ingress-faithful (§2.3).
 
 ## §0 What the tree already answers
 
@@ -124,24 +124,11 @@ Code archaeology on `main` (`quplzywy`). Several questions shrink because of wha
 
 ### §2.3 Where recorded audio lands on replay (D6)
 
-Live, at the visuals destination (`td`): a signal arriving at `a` is delivered at `a + D_rec`. The music it belongs to was captured at `c ≈ a + M` (M: how late the mix comes back) and delivered at `c`. The console's anchored strip sets `D_rec ≈ M` by eye, so the two meet.
+**Settled (Chris, 2026-10-20): ingress-faithful, no lead.** A replay reproduces the hub's ingress: every signal at its recorded arrival time, every audio packet at its recorded packet stamp, relative to each other exactly as they entered the hub live. The rig's sync points (`signal_delay_ms`, `td_round_trip_ms`) then align them as they did live.
 
-A replay has **no mixer**: the audio already carries M inside it. Three options:
-
-| Option | Audio emitted at | TD alignment | Console's alignment strip |
-|---|---|---|---|
-| a. As recorded | `h(τ_c)` | right only if the rig keeps `D_now = D_rec` | reads `D_rec`: a mixer that is not there |
-| **b. Lead by `D_rec`** | `h(τ_c) − D_rec` | right with `D_now` = **this** rig's own latency, 0 solo □ | **reads 0**, then works as it does live □ |
-| c. Lead by `D_rec − D_now` | `h(τ_c) − D_rec + D_now` | always reproduces the venue | **the delay slider stops doing anything** to TD's alignment □ |
-
-- **Recommendation as proposed: b.** The audio lands on the beat it was played on, the clock and the signals keep their recorded times, and the rig's own sync points (TD's audio path, the device round trip) apply as for any live show. The take holds the venue's offset; the rig holds its own.
-- **Settled: c**, once Chris required the sync points to apply unchanged during a replay so the live NDI path can be tested (§4.3). With b, a replay on the recording rig (`D_now = D_rec`) delivers each signal to TD `D_rec` later than its music: b is right only when `D_now` is the rig's own latency. c is b's generalisation: `D_now = 0` gives b; `D_now = D_rec` gives 0, the audio exactly as recorded, every consumer timed as live (the "known error" below disappears, since `P` sits on both sides). The slider still moves signals against audio while replaying, as live: the lead is fixed when the replay starts.
-- **Which `D_rec`**: the value in force at the end of the take, i.e. the operator's final tuning. `--audio-lead-ms` and the console override it. A take with no sync record uses 0.
-- **Known error** ◇: the setup guide says to measure what the visuals still see early and "add it to the signal delay", and expects the visuals to hear the music "some 30–50 ms after the hub captured it" (`setup.md`). A venue that did so has `D_rec = M + P_rec`, and option b plays the audio up to **30–50 ms early** relative to the signals.
-  - The take alone cannot tell M from P 🚫: one slider holds both.
-  - **Lever 1**: the strip shows the error during replay; `--audio-lead-ms` fixes it per take.
-  - **Lever 2** ◇: an offline `take analyze` estimates M from the take itself: kick onsets in the WAV against the recorded beat grid. Offline, so the live hub still computes nothing from audio.
-  - **Lever 3**: a second live slider separating M from P. Not proposed: it complicates the live UI for a replay concern.
+- **Why the mixer does not matter**: live, a signal entered at `a` and the music it caused entered at `c ≈ a + M` (M: how late the mix comes back). The take holds both times, so M is already in the recorded audio timing. Replayed at those times, TD gets the signal at `a + D` and the music at `a + M`, as at the venue; a rig whose signal delay is tuned to the mixer lines them up as it did live. The signal delay in force while recording plays no part.
+- **Dropped**: the proposal's options of playing the audio early by the recorded signal delay (as if the mixer had no latency), and their 30–50 ms error when TD's own audio path was folded into the delay. With no lead there is nothing to get wrong.
+- `replay --offset-ms N` is a manual nudge (audio N ms ahead of the signals, negative behind), default 0.
 
 ## §3 The take (D3, D9)
 
@@ -150,7 +137,7 @@ A replay has **no mixer**: the audio already carries M inside it. Three options:
 ```
 ~/.local/share/tussen/takes/2026-10-20T21-14-03-rehearsal/
   take.toml      # meta: version, UTC start, hub-clock at t=0, sample rate, channels,
-                 #       packet frames, audio lead, markers, duration (rewritten each flush)
+                 #       packet frames, signal delay, markers, duration (rewritten each flush)
   audio.wav      # L16 stereo 48 kHz, exactly what RTP carried
   events.bin     # append-only log: OSC, sync, Link, audio anchors, markers
   hub.toml       # the config in use when recording started
@@ -206,7 +193,7 @@ record := u32 len · u8 kind · u64 t_us · payload
 - **OSC**: the replay thread sleeps to each record's `h(τ)` with the router's precise-wakeup policy (`timing::precise_wakeups`). Without it a macOS sleep overshoots by 3 ms on average, 10 ms at worst ◇ (`timing.rs`). It sends into the router as a generator does.
 - **Origin**: a third origin besides "network" and "hub": `Origin::Replay`. The websocket's `osc` frame says `"src":"replay"` and the console's seen table marks those addresses. **The only visible difference** □, and a documented one (signals-websocket.md gains one value).
 - **Skipped on replay**: `/tussen/hub/…` (D11). Clock records are skipped from S2 on (§5).
-- **Audio**: a pacer pushes 256-frame blocks into an `rtrb` ring at `h(τ) − lead`, and the existing sender (`stream_ring`) does the rest. Same packetizer, same SSRC, continuous `seq` and RTP timestamp across loops and seeks □. A receiver cannot tell a seam from a live transition. Devices and statics get it at their sync points, as live.
+- **Audio**: a pacer pushes 256-frame blocks into an `rtrb` ring at `h(τ)`, and the existing sender (`stream_ring`) does the rest. Same packetizer, same SSRC, continuous `seq` and RTP timestamp across loops and seeks □. A receiver cannot tell a seam from a live transition. Devices and statics get it at their sync points, as live.
 - **Devices registering during replay work**, because registration is live and unaffected □. That is how a shader dev connects: open the Unity app or TD; it says hello and gets the recorded performance from its next packet on.
 - **Pause** sends silent RTP packets, so receivers' jitter buffers and analysis (rms, bands) see silence instead of an underrun ◇. OSC stops, and last values hold at the consumers.
 - **Speakers**: the hub has no audio output today □. To hear a replay, use what exists: a static destination with an `rtp_port` and `ffplay` on the SDP from `tussen-hub sdp` ◇, or GStreamer into a loopback device as for TD (`setup.md`). Hub speakers come with the mesh proposal's output stage (`simply-audio-device`), and replay would reuse it.
@@ -233,7 +220,7 @@ NDI is not recorded (the hub never carries it), but the live NDI path works duri
 - TD sends its NDI straight to the devices, as at a show.
 - The devices get the replayed signals `signal_delay_ms + td_round_trip_ms` late and the audio `td_round_trip_ms` late (if they follow TD), exactly as live, so they line up with the NDI coming back.
 
-What makes this hold: the replay injects at `route`, so both sync points apply unchanged, and the audio lead is `D_rec − D_now` (D6). Test: `a_replay_drives_td_and_a_device_through_both_sync_points` in `hub/tests/replay.rs` (60 ms signal delay, 40 ms round trip: hit and music meet at TD within 8 ms, and at the device 40 ms later).
+What makes this hold: the replay injects at `route`, so both sync points apply unchanged, and the audio plays at its recorded ingress time (D6, no lead). Test: `a_replay_drives_td_and_a_device_through_both_sync_points` in `hub/tests/replay.rs` (60 ms signal delay, 40 ms round trip: hit and music meet at TD within 8 ms, and at the device 40 ms later).
 
 ### §4.4 Recording while replaying
 
@@ -295,7 +282,7 @@ A jump must leave every consumer in the world as it was at the target: knobs whe
 - **On a jump**: send each address's snapshot value **where it differs from what consumers last got**, in one router round. Addresses first seen after τ get nothing, except **MIDI notes and pad buttons, which are sent 0**: no hung notes □.
 - **Events are never re-fired**: addresses matching `[replay] events`, default `*/press`, `*/tap`, `*/recenter`, `/tussen/clock/onbeat`, `*/onset`: the "event" entries of `osc-signals.md`.
 - **Belt and braces** □: MIDI and pad state re-sends every 500 ms anyway, and 60 Hz device signals heal within a frame. Snapshots matter most for on-change sources (`/djay/`, `/ext/`, slow CCs).
-- Sync and Link state at τ come from the same scan, so the audio lead and the bar grid are right after a jump.
+- Link state at τ comes from the same scan, so the bar grid is right after a jump.
 
 ### §6.3 Rate (D12)
 
@@ -351,7 +338,6 @@ tussen-hub take dump <take> [--from 1:20] [--grep /tussen/midi/]   # NDJSON
 | The recorder slows the router at 10 k msg/s | ◇ one `encode` + `try_send` per message; the router already encodes per routed message | S1 benchmark: router `in=` rate with and without `--record`; drops counted, never blocking |
 | Replay timing jitter on macOS | ◇ 3 ms mean without the time-constraint policy (`timing.rs`) | precise wakeups on the replay and pacer threads; S1 test (4) bounds it |
 | A live device has a recorded device's name | □ ownership is by address: it will not receive the recorded one's signals, and in S1 both publish under one prefix | console warning on collision; S5 claims; the setup guide says to pick another name |
-| `D_rec` contains TD's own path P (§2.3) | ◇ up to 30–50 ms if the venue followed `setup.md` | the strip shows it; `--audio-lead-ms`; offline `take analyze` |
 | Audio speakers for the shader dev | □ the hub has no output | ffplay/GStreamer now (§4.1); the mesh output stage later |
 | Absolute beat numbers differ from the take under S4 | □ by placement | consumers counting absolute beats (rare) see an offset; bar phase is exact |
 | A venue's DJs yanked by a replay's tempo | □ only with `--link lead` | `auto` never proposes when others are in the session |
@@ -368,7 +354,7 @@ tussen-hub take dump <take> [--from 1:20] [--grep /tussen/midi/]   # NDJSON
 |---|---|---|---|
 | injecting signals | `Generator`, the router's channel, `route()` | `route(m, origin, now)`: `Origin::{Net(addr), Hub, Replay}` instead of `Option<SocketAddr>` | the replay thread |
 | delivering them right | subscriptions, ownership rule, remaps, both sync points, delay lines | | |
-| audio out | `stream_ring`, `Packetizer`, `DelayRing`, `Readers`, statics, `sdp` | | the pacer; the lead |
+| audio out | `stream_ring`, `Packetizer`, `DelayRing`, `Readers`, statics, `sdp` | | the pacer |
 | clock on replay | `link::sample`, `Beats`, `next_wake`, `private` | a `SessionState` from recorded timeline points | unrolling across loops |
 | Link placement | `found`, `propose_tempo`, the console-start rule | | launch quantisation |
 | recording | the console tap's position in `route`; the sender's level tap | a second consumer beside `LevelBatch` | recorder thread, two writers |
@@ -387,7 +373,6 @@ tussen-hub take dump <take> [--from 1:20] [--grep /tussen/midi/]   # NDJSON
 - **Absolute beat numbers are not preserved under S4**: only bar phase.
 - **Rate 1.0 only**, no scrubbing with sound.
 - **~1–2.6 GB per hour** until S6 compresses the log.
-- **The audio lead is one number per take**: a venue that retuned the signal delay mid-show replays with the last value.
 - **NDI and TD's picture are not recorded** (the hub never carries NDI): devices following TD (sync point 2) line up with the live TD in the room, not the one at the venue.
 
 ## §12 Where this contradicts what exists

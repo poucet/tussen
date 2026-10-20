@@ -29,9 +29,9 @@
   events, and keeps the beat counting up in phase.
 - **Both sync points apply during a replay, as live**, so a replay can
   drive TouchDesigner and the devices to test the whole visual path (TD's
-  NDI to the devices stays live; NDI is never recorded). The take's audio
-  plays early by its recorded signal delay minus the current one: not at
-  all on the rig that recorded it. `--offset-ms` overrides.
+  NDI to the devices stays live; NDI is never recorded). A replay is the
+  hub's ingress reproduced: audio at its recorded time relative to the
+  signals, no lead. `--offset-ms` nudges it by hand.
 - `simply-tussen takes` lists takes; the console's top bar shows
   `REPLAY <take> · bar x/y · loop a–b`; the `link` frame gains `replay`,
   `hello` gains `record`, and the page sends `record_start` / `record_stop`.

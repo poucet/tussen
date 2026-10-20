@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! <takes>/2026-10-20T21-14-03-rehearsal/
-//!   take.toml    meta, rewritten at every flush (duration, audio lead)
+//!   take.toml    meta, rewritten at every flush (duration, signal delay)
 //!   audio.wav    L16 interleaved, exactly what RTP carried; header patched at every flush
 //!   events.bin   append-only log: OSC at ingress, sync, Link timeline, audio anchors
 //!   hub.toml     the config in use when recording started
@@ -81,7 +81,8 @@ pub struct Meta {
     pub packet_frames: usize,
     /// Beats per bar of the recorded timeline.
     pub quantum: f64,
-    /// The signal delay in force at the end of the take (design D6).
+    /// The signal delay in force at the end of the take (informational:
+    /// a replay is ingress-faithful and uses the replaying rig's).
     pub signal_delay_ms: u32,
     /// Last flush: take length and what it holds.
     pub duration_us: u64,

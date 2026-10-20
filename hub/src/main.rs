@@ -62,9 +62,9 @@ enum Command {
         /// Start at this bar.
         #[arg(long = "from", value_name = "BAR")]
         from_bar: Option<u32>,
-        /// Play the audio this many ms ahead of the signals (negative:
-        /// behind). Default: the take's final signal delay minus this
-        /// config's, so audio and signals meet at TD with the sync points as set.
+        /// A manual nudge: play the audio this many ms ahead of the signals
+        /// (negative: behind). Default 0: audio and signals exactly as they
+        /// entered the hub, the sync points then align them as live.
         #[arg(long, allow_hyphen_values = true)]
         offset_ms: Option<i32>,
         /// Lead the Link session with the take's timeline (found one if
