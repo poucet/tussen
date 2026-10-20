@@ -16,6 +16,7 @@ use tussen_hub::config::Config;
 use tussen_hub::generators::audio::{rtp, stream_ring, AudioLink};
 use tussen_hub::hub::{self, Extras, Takes};
 use tussen_hub::replay::{self, LinkMode, Options};
+use tussen_hub::record;
 use tussen_hub::take::{self, Meta, Recorder, Take};
 
 fn tmp(name: &str) -> PathBuf {
@@ -133,17 +134,19 @@ fn off() -> Options {
 /// The acceptance run: record ~3 s of a synthetic session, replay it.
 #[test]
 fn a_recorded_session_replays_to_a_device_as_if_live() {
-    let dir = tmp("session");
-    let rec = Recorder::start(&dir, meta(), None).unwrap();
+    let takes = tmp("session");
+    // The live hub, recording (as the console's Record button does);
+    // audio from a paced test capture.
+    let audio = Arc::new(AudioLink::default());
+    let control = record::Control::new(Some(takes.clone()), meta(), None, Some(Arc::clone(&audio)));
+    let rec = control.start(None).unwrap();
+    let dir = rec.dir().to_owned();
     let t0 = rec.start_instant();
     // The Link timeline: 120 BPM from beat 0, 150 from 1.5 s (beat 3).
     rec.link(t0, 120.0, 0.0, true, 0, 4.0);
     rec.link(t0 + Duration::from_millis(1500), 150.0, 3.0, true, 0, 4.0);
 
-    // The live hub, recording; audio from a paced test capture.
-    let audio = Arc::new(AudioLink::default());
     let cfg = config().audio;
-    let _ = audio.rec.set(Mutex::new(rec.audio_tap(cfg.packet_frames * 2)));
     let (mut ring_tx, ring_rx) = rtrb::RingBuffer::<f32>::new(48000 * 2);
     stream_ring(cfg.clone(), Arc::clone(&audio), ring_rx).unwrap();
     let (gen_tx, gen_rx) = crossbeam_channel::bounded::<Message>(4096);
@@ -152,7 +155,7 @@ fn a_recorded_session_replays_to_a_device_as_if_live() {
         gen_rx,
         true,
         Extras { audio: Some(Arc::clone(&audio)), console: None },
-        Takes { recorder: Some(Arc::clone(&rec)), ..Takes::default() },
+        Takes { record: Some(control.slot()), ..Takes::default() },
     )
     .unwrap();
     let hub_at = ("127.0.0.1", hub.addr().port());
@@ -199,7 +202,7 @@ fn a_recorded_session_replays_to_a_device_as_if_live() {
     std::thread::sleep(Duration::from_millis(50));
     drop(hub);
     audio.stop.store(true, Ordering::Relaxed);
-    rec.finish();
+    control.stop();
     while ghost.recv_from(&mut [0u8; 2048]).is_ok() {} // what the ghost got live
 
     let take = Take::open(&dir).unwrap();
@@ -262,7 +265,7 @@ fn a_recorded_session_replays_to_a_device_as_if_live() {
     let change = bpm.iter().find(|b| (b.1 - 150.0).abs() < 1e-3).expect("150 BPM published").0;
     let after_hit = ms(change.duration_since(hits[0].0));
     assert!((after_hit - 500.0).abs() < 25.0, "tempo change {after_hit:.0} ms after the first hit");
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&takes);
 }
 
 /// A take built from synthetic stamps: (ms, message).

@@ -30,6 +30,7 @@ use crate::console::{self, Event, RouterCmd, RouterConsole, SeenTable};
 use crate::generators::audio::{AudioLink, RtpTarget};
 use crate::router::{classify, resolve_host, HelloOutcome, HubMessage, Router};
 use crate::sync::{self, Class, DelayLine, SyncState};
+use crate::record::{self, Slot};
 use crate::take::Recorder;
 
 /// A running hub. Dropping it stops the loop.
@@ -98,8 +99,9 @@ pub struct Extras {
 /// What `run --record` / `run --replay` attach to the router.
 #[derive(Default)]
 pub struct Takes {
-    /// `run --record`: every routed message and sync change goes here.
-    pub recorder: Option<Arc<Recorder>>,
+    /// Recording on demand ([`crate::record`]): while the slot holds a
+    /// recorder, every routed message and sync change goes into it.
+    pub record: Option<Slot>,
     /// `run --replay`: the replay's signals, routed as [`Src::Replay`].
     pub replay: Option<Receiver<Message>>,
 }
@@ -339,7 +341,12 @@ struct Loop {
     hub_port: u16,
     /// Static destination re-resolve rounds ([`spawn_resolver`]).
     resolved: Receiver<Resolved>,
+    /// The take being written, and where to look for a new one.
     recorder: Option<Arc<Recorder>>,
+    record: Option<Slot>,
+    /// The last message routed per address, with its source — what a
+    /// take started mid-run is seeded with. Kept only if recording can start.
+    last: HashMap<String, (Option<SocketAddr>, Message)>,
     replay: Option<Receiver<Message>>,
 }
 
@@ -354,11 +361,10 @@ struct ConsoleSide {
 
 impl Loop {
     fn new(config: &Config, router: Router, extras: Extras, takes: Takes) -> Loop {
-        if let Some(r) = &takes.recorder {
-            r.sync(Instant::now(), config.sync.signal_delay_ms, config.sync.td_round_trip_ms);
-        }
         Loop {
-            recorder: takes.recorder,
+            recorder: None,
+            record: takes.record,
+            last: HashMap::new(),
             replay: takes.replay,
             router,
             max_packet: config.osc.max_packet,
@@ -469,6 +475,7 @@ impl Loop {
                 default(wait) => {}
             }
             let now = Instant::now();
+            self.follow_recorder();
 
             if let Some(inbound) = inbound {
                 self.inbound(&inbound, now);
@@ -517,6 +524,24 @@ impl Loop {
                 last_report = now;
             }
         }
+    }
+
+    /// Pick up a take started or stopped since the last round. A new one
+    /// gets the sync state and the last value of every address at its t = 0.
+    fn follow_recorder(&mut self) {
+        let Some(slot) = &self.record else { return };
+        let now = record::current(slot);
+        if !record::changed(&self.recorder, &now) {
+            return;
+        }
+        if let Some(r) = &now {
+            let t0 = r.start_instant();
+            r.sync(t0, self.sync.sync.signal_delay_ms, self.sync.sync.td_round_trip_ms);
+            for (from, m) in self.last.values() {
+                r.osc(t0, *from, m);
+            }
+        }
+        self.recorder = now;
     }
 
     fn command(&mut self, c: RouterCmd) {
@@ -584,8 +609,17 @@ impl Loop {
     /// into this round's datagrams.
     fn route(&mut self, m: &Message, from: Src, now: Instant) {
         let class = sync::class_of(&m.address);
+        let from_addr = if let Src::Net(a) = from { Some(a) } else { None };
         if let Some(r) = &self.recorder {
-            r.osc(now, if let Src::Net(a) = from { Some(a) } else { None }, m);
+            r.osc(now, from_addr, m);
+        }
+        if self.record.is_some() && !crate::replay::is_skipped(&m.address) && !crate::replay::is_event(&m.address) {
+            match self.last.get_mut(&m.address) {
+                Some(v) => *v = (from_addr, m.clone()),
+                None => {
+                    self.last.insert(m.address.clone(), (from_addr, m.clone()));
+                }
+            }
         }
         let console = &mut self.console;
         if let Some(c) = console.as_mut() {

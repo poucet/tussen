@@ -91,6 +91,8 @@ const SPEC = {   // t -> {required, optional}
   save: { req: [], opt: [] },
   set_tempo: { req: ['bpm'], opt: [] },
   set_playing: { req: ['playing'], opt: [] },
+  record_start: { req: [], opt: ['name'] },
+  record_stop: { req: [], opt: [] },
 };
 function conforms(m) {
   const s = SPEC[m.t]; if (!s) return 'unknown t ' + m.t;
@@ -108,6 +110,7 @@ function conforms(m) {
   if ('range' in m && !(Array.isArray(m.range) && m.range.length === 2)) return 'range must be [lo, hi]';
   if (m.t === 'set_tempo' && !(typeof m.bpm === 'number' && m.bpm >= 20 && m.bpm <= 999)) return 'bpm must be a number in 20..999';
   if (m.t === 'set_playing' && typeof m.playing !== 'boolean') return 'playing must be a bool';
+  if (m.t === 'record_start' && 'name' in m && !(typeof m.name === 'string' && m.name.trim())) return 'record_start name must be a non-empty string';
   return null;
 }
 const sent = [
@@ -126,6 +129,7 @@ const sent = [
   L.msg.setTempo(5000),
   L.msg.setPlaying(false),
   L.msg.setPlaying(1),
+  L.msg.recordStart(), L.msg.recordStart('  sound check '), L.msg.recordStop(),
 ];
 for (const m of sent) ok(conforms(m) === null, 'conforms: ' + JSON.stringify(m), conforms(m));
 ok(sent[1].signal_delay_ms === 70 && !('td_round_trip_ms' in sent[1]), 'set_sync carries only the moved field');
@@ -378,6 +382,22 @@ section('Link');
 }
 { // modes: waiting → Start session; waiting → a peer joins
   ok(run.msgs.filter(m => m.t === 'link').every(m => m.mode === 'joined'), 'mock with peers: joined');
+  ok(JSON.stringify(L.msg.recordStart()) === '{"t":"record_start"}' && JSON.stringify(L.msg.recordStart(' a ')) === '{"t":"record_start","name":"a"}' && JSON.stringify(L.msg.recordStop()) === '{"t":"record_stop"}', 'msg.recordStart / recordStop');
+  ok(L.recordLabel({ on: true, take: 'T-x', elapsedMs: 64000, atMs: 100 }, 1600) === '● REC 1:05 · T-x' && L.recordLabel({ on: false, take: 'T-x', elapsedMs: 0, atMs: 0 }, 9) === '' && L.recordLabel(null, 0) === '', 'recordLabel');
+  ok(L.normRecord(undefined, 0) === null && L.normRecord({ on: true, take: 't', elapsed_ms: 5 }, 7).atMs === 7, 'normRecord: absent = this hub cannot record');
+  { // the Record button through the mock: start (named), a refused second start, stop
+    const r = runMock({}, 4, (hub, el) => {
+      if (el === 990e3) hub.onMessage(L.msg.recordStart('sound check'));
+      if (el === 1500e3) hub.onMessage(L.msg.recordStart());
+      if (el === 3000e3) hub.onMessage(L.msg.recordStop());
+    });
+    const recs = r.msgs.filter(m => m.t === 'hello').map(m => m.record);
+    ok(recs.length === 4 && recs.every(x => x && typeof x.on === 'boolean' && Number.isInteger(x.elapsed_ms)), 'every hello carries record', recs);
+    ok(!recs[0].on && recs[1].on && recs[1].take.endsWith('-sound-check') && recs[2].on && recs[2].take === recs[1].take, 'record_start: on, named; a second start keeps the take', recs);
+    ok(Math.abs(recs[2].elapsed_ms - 510) < 20, 'elapsed counts from the press', recs[2]);
+    ok(!recs[3].on && recs[3].take === recs[1].take && r.S.record && !r.S.record.on, 'record_stop: off, the last take still named');
+    ok(r.hub.errors.length === 0, 'mock saw no protocol errors (record)', r.hub.errors);
+  }
   ok(L.replayLabel({ take: 'T-rehearsal', bar: 10.34, bars: 24, loop: [9, 17] }) === 'REPLAY T-rehearsal · bar 10.3/24 · loop 9–17' && L.replayLabel({ take: 't', bar: 1, bars: 3 }) === 'REPLAY t · bar 1.0/3' && L.replayLabel(null) === '', 'replayLabel');
   ok(L.linkLabel({ mode: 'joined', peers: 2 }) === 'Link 2 peers' && L.linkLabel({ mode: 'started', peers: 1 }) === 'Link 1 peer' && L.linkLabel({ mode: 'waiting', peers: 0 }) === 'Link: waiting' && L.linkLabel(null) === 'no Link', 'linkLabel');
   ok(/joins the first one it hears/.test(L.linkModeNote({ mode: 'waiting' })) && /stays until the hub stops/.test(L.linkModeNote({ mode: 'started' })) && /waits again/.test(L.linkModeNote({ mode: 'joined' })), 'linkModeNote says the rule');

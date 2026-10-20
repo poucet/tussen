@@ -4,7 +4,7 @@
 // point 1) moves the markers onto the kicks, the round trip (sync point 2) and
 // the follow switch round-trip, watch/rule/save round-trip, the Link peer
 // dropdown (open, outside click, Escape, empty state), waiting → Start
-// session and waiting → a session appears. Node stdlib only (needs
+// session and waiting → a session appears, and the Record button. Node stdlib only (needs
 // Node >= 22 for the global WebSocket). Skips (exit 0) when Chrome is absent.
 //   node tools/console-test/browser.js            # screenshot -> <repo>/.screenshots/progress/<date>-console-test/
 //   SCREENSHOT_DIR=… node browser.js              # a lane labels its own directory
@@ -234,6 +234,20 @@ let ch = null;
   await sleep(400);
   ok(await ev("!document.body.classList.contains('tab-osc') && document.querySelector('#oscpage').offsetParent === null"), 'sync tab comes back');
 
+  // ---- the Record button: start, the running clock, stop ------------------------
+  ok(!(await ev("document.querySelector('#rec').hidden")) && /Record/.test(await ev("document.querySelector('#rec').textContent")), 'Record button in the top bar');
+  ok(await ev("document.querySelector('#recinfo').textContent") === '', 'not recording: no clock');
+  await ev("document.querySelector('#rec').click()");
+  await sleep(1400);
+  ok(/Stop/.test(await ev("document.querySelector('#rec').textContent")) && await ev("document.querySelector('#rec').classList.contains('on')"), 'recording: the button turns into Stop');
+  const recText = await ev("document.querySelector('#recinfo').textContent");
+  ok(/^● REC 0:0[1-2] · 2026-10-20T21-14-03$/.test(recText), 'recording: elapsed time and take name', recText);
+  const shotR = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: 120, scale: 1 } });
+  fs.writeFileSync(path.join(shotDir, 'console-recording.png'), Buffer.from(shotR.result.data, 'base64'));
+  await ev("document.querySelector('#rec').click()");
+  await sleep(400);
+  ok(/Record/.test(await ev("document.querySelector('#rec').textContent")) && await ev("document.querySelector('#recinfo').textContent") === '', 'Stop: back to Record, the clock goes');
+
   // ---- waiting for a Link session → Start session ----------------------------
   ok(await ev("document.querySelector('#linkstart').hidden"), 'in a session: no Start session button');
   await cdp('Page.navigate', { url: page + '&peers=0' });
@@ -267,7 +281,7 @@ let ch = null;
 
   ok(errors.length === 0, 'no uncaught errors / console errors', errors);
 
-  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-waiting.png, console-link-started.png');
+  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-waiting.png, console-link-started.png, console-recording.png');
   console.log((fail ? 'FAILED' : 'ok') + ': ' + pass + ' passed, ' + fail + ' failed');
   clearTimeout(killer); ws.close(); ch.kill('SIGKILL');
   process.exit(fail ? 1 : 0);

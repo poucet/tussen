@@ -4,11 +4,11 @@
 #
 #   ./simply-tussen install [--prefix DIR]   install simply-tussen into DIR/bin (default ~/.local/bin),
 #                                            so `simply-tussen …` does what `./simply-tussen …` does
-#   ./simply-tussen run …                    also opens the console in your browser
+#   ./simply-tussen run … / replay …         also opens the console in your browser
 #                                            (TUSSEN_NO_OPEN=1 skips it; the binary never does)
 #
 # Start the hub with `./simply-tussen run` (bare `./simply-tussen` prints the help).
-# Examples: ./simply-tussen run · ./simply-tussen run --fake-midi --fake-pad · ./simply-tussen config init
+# Examples: ./simply-tussen run · ./simply-tussen run --fake-midi --fake-pad · ./simply-tussen replay latest --loop 9..17 · ./simply-tussen config init
 # The hub prints its console URL and OSC endpoint on start; `run --stats` adds
 # a counters line a second.
 set -euo pipefail
@@ -52,6 +52,8 @@ ARGS=()
 prev=""
 for a in "$@"; do
   if [ "$prev" = "--config" ] && [ "${a#/}" = "$a" ]; then a="$PWD/$a"; fi
+  # A take given by a relative path (`replay ./my-take`) is the caller's too.
+  if [ "${a#/}" = "$a" ] && [ -f "$PWD/$a/take.toml" ]; then a="$PWD/$a"; fi
   case "$a" in --config=*) v="${a#--config=}"; [ "${v#/}" = "$v" ] && a="--config=$PWD/$v" ;; esac
   ARGS+=("$a"); prev="$a"
 done
@@ -94,12 +96,13 @@ open_console() {
 build_hub
 case "${1:-}" in
   install) shift; install_hub "$@" ;;
-  run)     open_console ${ARGS[@]+"${ARGS[@]}"}; cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;
+  run|replay)
+           open_console ${ARGS[@]+"${ARGS[@]}"}; cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;
   ""|help|-h|--help)
            rc=0; (cd "$ROOT" && "$HUB" ${ARGS[@]+"${ARGS[@]}"}) || rc=$?
            echo
            echo "./simply-tussen adds: install [--prefix DIR] (simply-tussen into DIR/bin, default ~/.local/bin),"
-           echo "and run also opens the console in your browser (TUSSEN_NO_OPEN=1 skips it)."
+           echo "and run and replay also open the console in your browser (TUSSEN_NO_OPEN=1 skips it)."
            exit "$rc" ;;
   *)       cd "$ROOT" && exec "$HUB" ${ARGS[@]+"${ARGS[@]}"} ;;
 esac

@@ -37,6 +37,7 @@ pub struct DestOut {
     pub follow: Option<Follow>,
 }
 
+#[cfg(test)]
 pub fn hello(
     dests: &[DestOut],
     signal_delay_ms: u32,
@@ -45,6 +46,18 @@ pub fn hello(
     sample_rate: u32,
     osc: &OscEndpoint,
 ) -> String {
+    hello_value(dests, signal_delay_ms, td_round_trip_ms, remaps, sample_rate, osc).to_string()
+}
+
+/// [`hello`] before serialising, so the console can add `record`.
+pub fn hello_value(
+    dests: &[DestOut],
+    signal_delay_ms: u32,
+    td_round_trip_ms: u32,
+    remaps: &[RemapRule],
+    sample_rate: u32,
+    osc: &OscEndpoint,
+) -> Value {
     json!({
         "t": "hello",
         "sync": { "signal_delay_ms": signal_delay_ms, "td_round_trip_ms": td_round_trip_ms },
@@ -53,7 +66,6 @@ pub fn hello(
         "sample_rate": sample_rate,
         "osc": osc,
     })
-    .to_string()
 }
 
 pub fn dests(dests: &[DestOut]) -> String {
@@ -112,6 +124,9 @@ pub enum Request {
     /// session now, if waiting.
     Link(crate::link::LinkCmd),
     Save,
+    /// `record_start` (optional `name`) / `record_stop`: the Record button.
+    RecordStart(Option<String>),
+    RecordStop,
 }
 
 fn ms(v: &Value, key: &str) -> Result<Option<u32>, String> {
@@ -189,6 +204,10 @@ pub fn parse_request(text: &str) -> Result<Request, String> {
         }
         "remap_delete" => Ok(Request::Delete(id(v.get("id"))?)),
         "save" => Ok(Request::Save),
+        "record_start" => Ok(Request::RecordStart(
+            v.get("name").and_then(Value::as_str).map(str::to_owned).filter(|n| !n.trim().is_empty()),
+        )),
+        "record_stop" => Ok(Request::RecordStop),
         "set_tempo" => match v.get("bpm").and_then(Value::as_f64) {
             Some(bpm) if bpm.is_finite() => Ok(Request::Link(crate::link::LinkCmd::Tempo(bpm))),
             _ => Err("set_tempo needs a number bpm".into()),
@@ -351,6 +370,9 @@ mod tests {
         assert_eq!(parse_request(r#"{"t":"link_start"}"#).unwrap(), Request::Link(LinkCmd::Start));
         assert!(parse_request(r#"{"t":"set_tempo","bpm":"fast"}"#).is_err());
         assert!(parse_request(r#"{"t":"set_playing"}"#).is_err());
+        assert_eq!(parse_request(r#"{"t":"record_start","name":"take 1"}"#).unwrap(), Request::RecordStart(Some("take 1".into())));
+        assert_eq!(parse_request(r#"{"t":"record_start"}"#).unwrap(), Request::RecordStart(None));
+        assert_eq!(parse_request(r#"{"t":"record_stop"}"#).unwrap(), Request::RecordStop);
         assert!(parse_request(r#"{"t":"nope"}"#).is_err());
         assert!(parse_request("not json").is_err());
         assert!(parse_request(r#"{"t":"set_sync","signal_delay_ms":"x"}"#).is_err());

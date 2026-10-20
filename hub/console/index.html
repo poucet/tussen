@@ -61,6 +61,8 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
 #hist td.v,#seen td.v{text-align:right;font-variant-numeric:tabular-nums}
 #histpause.on{color:var(--acc)}
 #linkgrp{position:relative}
+#rec{font-weight:bold}#rec.on{background:#8b2626;color:#fff;border-color:#c33}
+#recinfo{color:#f66;font-variant-numeric:tabular-nums}#recinfo.err{color:#e9a}
 #replayst{background:#8b2626;color:#fff;padding:1px 7px;border-radius:9px;font-variant-numeric:tabular-nums}
 #linkst{cursor:pointer;border-bottom:1px dotted var(--dim)}#linkst:hover{color:#fff}
 #peerdrop{display:none;position:absolute;top:calc(100% + 5px);left:0;z-index:5;min-width:520px;background:var(--pn);border:1px solid var(--ln);box-shadow:0 6px 18px #000a;padding:6px 8px}
@@ -77,7 +79,8 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
   <button id="pause" title="Space">⏸ pause</button>
   <span>window <input id="win" type="number" min="50" max="10000" step="10" value="2000"> ms</span>
   <span>gain <input id="gain" type="number" min="0.25" max="64" step="0.25" value="1"></span>
-  <span id="replayst" hidden title="the hub is replaying a take (simply-tussen run --replay): every signal and the audio come from it"></span>
+  <span id="recgrp"><button id="rec" hidden title="record a take: every signal, the audio and the Link timeline, from now until Stop (simply-tussen replay plays it back)">● Record</button> <span id="recinfo"></span></span>
+  <span id="replayst" hidden title="the hub is replaying a take (simply-tussen replay): every signal and the audio come from it"></span>
   <span id="linkgrp" title="Ableton Link: the hub joins the session it hears, or waits with a beat of its own; the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="who is in the Link session — click for the list">no Link</span><div id="peerdrop" role="dialog" aria-label="Link peers"></div> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button> <button id="linkstart" hidden title="found a Link session now, at this tempo — for when nobody else will join">⊕ start session</button></span>
   <span id="readout" class="dim">—</span>
   <span id="endpoint" title="where OSC senders (djay Pro, tablets, scripts) send — any address under its own prefix, UDP">OSC in <code id="eptext">…</code><button id="epcopy" title="copy ip:port">⧉ copy</button></span>
@@ -274,6 +277,7 @@ function createState() {
     links: [], linkAtMs: -Infinity,    // recent `link` messages (ts ascending); local ms of the last
     linkPeers: [],                     // the latest `link` message's peer_list (normPeers)
     replay: null,                      // the latest `link` message's replay {take, bar, bars, loop}, if replaying
+    record: null,                      // hello's record {on, take, elapsedMs, atMs, error}; null: this hub cannot record
     oscEndpoint: null,                 // hello's osc {port, ips, hostname}: where senders aim
     addrSeen: new Map(),               // addr -> latest addrs entry; accumulates, never deletes
     history: { buf: [], total: 0 },    // live messages, ts ascending, ring of HISTORY_CAP
@@ -354,6 +358,17 @@ function linkLabel(l) {
   if (l.mode === 'waiting') return 'Link: waiting';
   return 'Link ' + l.peers + ' peer' + (l.peers === 1 ? '' : 's');
 }
+// hello's `record`, stamped with the local ms it arrived at (for the running clock).
+function normRecord(r, localMs) {
+  if (!r || typeof r !== 'object') return null;
+  return { on: !!r.on, take: r.take ? String(r.take) : '', elapsedMs: Number(r.elapsed_ms) || 0, atMs: localMs, error: r.error ? String(r.error) : '' };
+}
+// The text beside the Record button: `● REC 1:05 · <take>` while on.
+function recordLabel(r, nowMs) {
+  if (!r || !r.on) return '';
+  const s = Math.max(0, Math.floor((r.elapsedMs + Math.max(0, nowMs - r.atMs)) / 1000));
+  return '● REC ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') + (r.take ? ' · ' + r.take : '');
+}
 // The top bar while replaying: `REPLAY <take> · bar 10.3/24 · loop 9–17`.
 function replayLabel(r) {
   if (!r) return '';
@@ -384,6 +399,7 @@ function applyMessage(s, m, localMs) {
       s.dests = (m.dests || []).map(normDest);
       s.sync = normSync(m.sync);
       s.remaps = (m.remaps || []).map(normRemap);
+      s.record = normRecord(m.record, localMs);
       s.oscEndpoint = m.osc ? { port: Number(m.osc.port) || 0, ips: (m.osc.ips || []).map(String), hostname: m.osc.hostname ? String(m.osc.hostname) : null } : null;
       return 'hello';
     case 'dests':
@@ -488,6 +504,8 @@ const msg = {
   setTempo: (bpm) => ({ t: 'set_tempo', bpm: clampTempo(bpm) }),
   setPlaying: (p) => ({ t: 'set_playing', playing: !!p }),
   linkStart: () => ({ t: 'link_start' }),
+  recordStart: (name) => { const o = { t: 'record_start' }; const n = String(name || '').trim(); if (n) o.name = n; return o; },
+  recordStop: () => ({ t: 'record_stop' }),
 };
 function isTempId(id) { return typeof id === 'string' && id.startsWith('tmp-'); }
 
@@ -633,13 +651,19 @@ function createMockHub(opts) {
     questFollow: 'td',
     remaps: [{ id: 1, dest: 'td', from: '/tussen/*/head/n/yaw', to: '/td/yaw', range: [0, 1], keep: false }],
     watch: [], saves: 0,
+    record: { on: false, take: '', since: 0 },
   };
   const seen = new Map();     // addr -> {last_ts, hits: [ts...], v, count}
   const errors = [];          // protocol violations from the page
   const out = [];
   const touch = (addr, ts, v, dir) => { let e = seen.get(addr); if (!e) { e = { last_ts: ts, hits: [], v: 0, min: v, max: v, count: 0, dirs: 0 }; seen.set(addr, e); } e.last_ts = ts; e.v = v; e.min = Math.min(e.min, v); e.max = Math.max(e.max, v); e.count++; e.dirs |= dir; e.hits.push(ts); if (e.hits.length > 400) e.hits.splice(0, 200); };
   const MOCK_OSC = { port: 9000, ips: ['192.0.2.10'], hostname: 'mock-hub.local' };
-  const helloMsg = () => ({ t: 'hello', sync: Object.assign({}, st.sync), dests: allDests(), remaps: st.remaps.map(r => Object.assign({}, r)), sample_rate: sr, osc: Object.assign({}, MOCK_OSC, { ips: MOCK_OSC.ips.slice() }) });
+  const recordMsg = () => {
+    const r = { on: st.record.on, elapsed_ms: st.record.on ? Math.round((lastUs - st.record.since) / 1000) : 0 };
+    if (st.record.take) { r.take = st.record.take; r.path = '/mock/takes/' + st.record.take; }
+    return r;
+  };
+  const helloMsg = () => ({ t: 'hello', sync: Object.assign({}, st.sync), dests: allDests(), remaps: st.remaps.map(r => Object.assign({}, r)), sample_rate: sr, osc: Object.assign({}, MOCK_OSC, { ips: MOCK_OSC.ips.slice() }), record: recordMsg() });
   const allDests = () => st.dests.concat(questPresent ? [{ name: 'quest', kind: 'device', follow: st.questFollow }] : []).map(d => Object.assign({}, d));
   // MIDI/clock signals are hub-made (out, like the real hub's generated
   // ones); device and /ext/ OSC arrives on :9000 (in).
@@ -714,7 +738,7 @@ function createMockHub(opts) {
     lastUs = b;
     return out.splice(0, out.length);
   }
-  const ALLOWED = { watch: ['addrs'], set_sync: ['signal_delay_ms', 'td_round_trip_ms'], set_follow: ['dest', 'follow'], remap_upsert: ['id', 'dest', 'from', 'to', 'range', 'keep'], remap_delete: ['id'], save: [], set_tempo: ['bpm'], set_playing: ['playing'], link_start: [] };
+  const ALLOWED = { watch: ['addrs'], set_sync: ['signal_delay_ms', 'td_round_trip_ms'], set_follow: ['dest', 'follow'], remap_upsert: ['id', 'dest', 'from', 'to', 'range', 'keep'], remap_delete: ['id'], save: [], set_tempo: ['bpm'], set_playing: ['playing'], link_start: [], record_start: ['name'], record_stop: [] };
   function onMessage(m) {
     if (!m || !(m.t in ALLOWED)) { errors.push('unknown message ' + JSON.stringify(m)); return; }
     for (const k of Object.keys(m)) if (k !== 't' && !ALLOWED[m.t].includes(k)) errors.push(m.t + ': unknown field ' + k);
@@ -753,6 +777,12 @@ function createMockHub(opts) {
       }
       // like the hub: founds only while waiting, else ignored
       case 'link_start': if (link.mode === 'waiting') relink(lastUs, () => { link.mode = 'started'; }); return;
+      // like the hub: a second start while on is refused; every change re-sends hello
+      case 'record_start':
+        if ('name' in m && typeof m.name !== 'string') errors.push('record_start: name must be a string');
+        if (!st.record.on) st.record = { on: true, since: lastUs, take: '2026-10-20T21-14-03' + (m.name ? '-' + m.name.replace(/[^A-Za-z0-9_-]/g, '-') : '') };
+        out.push(helloMsg()); return;
+      case 'record_stop': st.record.on = false; out.push(helloMsg()); return;
     }
   }
   return { tick: tick, onMessage: onMessage, errors: errors, state: st, opts: o, kickTimeUs: (k) => t0 + kickOffsetUs + k * beatUs };
@@ -761,7 +791,7 @@ function round4(x) { return Math.round(x * 1e4) / 1e4; }
 
 const api = {
   BLOCK_FRAMES, MAX_DELAY_MS, FOLLOWS, KEEP_US, MIN_WINDOW_US, MAX_WINDOW_US,
-  TEMPO_MIN, TEMPO_MAX, LINK_KEEP, LINK_STALE_MS, LINK_MODES, clampTempo, beatGrid, linkLive, normPeers, peerRows, peerSummary, linkLabel, linkModeNote, replayLabel,
+  TEMPO_MIN, TEMPO_MAX, LINK_KEEP, LINK_STALE_MS, LINK_MODES, clampTempo, beatGrid, linkLive, normPeers, peerRows, peerSummary, linkLabel, linkModeNote, replayLabel, normRecord, recordLabel,
   signalClass, clampDelay, signalDelayMs, audioDelayMs, shiftTs,
   timeToX, xToTime, zoomView, gridStepMs, blockDurUs,
   AudioRing, midiKind, createState, resetBuffers, applyMessage, sortedAddrs, isHot, HEAT_MS, matchPattern,
@@ -809,13 +839,24 @@ function onHubText(text) {
     const cand = S.latestTs - nowLocalUs(), l = nowLocalUs();
     if (off.us === null || cand > off.us || l - off.atLocal > 2e6 || cand < off.us - 1e6) { off.us = cand; off.atLocal = l; }
   }
-  if (t === 'hello') { if (S.helloCount === 1 || connJustOpened) { connJustOpened = false; sendNow(watchMsg()); } rebuildDests(); renderRules(); renderUnsaved(); renderEndpoint(); }
+  if (t === 'hello') { if (S.helloCount === 1 || connJustOpened) { connJustOpened = false; sendNow(watchMsg()); } rebuildDests(); renderRules(); renderUnsaved(); renderEndpoint(); renderRecord(); }
   else if (t === 'dests') rebuildDests();
   else if (t === 'addrs') renderAddrs();
   else if (t === 'saved') { renderSaved(); renderUnsaved(); }
   else if (t === 'link') renderLink();
 }
 function latestLink() { return S.links.length ? S.links[S.links.length - 1] : null; }
+function renderRecord() {
+  const r = S.record, b = $('#rec'), info = $('#recinfo');
+  b.hidden = !r;
+  if (!r) { info.textContent = ''; return; }
+  b.classList.toggle('on', r.on);
+  b.textContent = r.on ? '■ Stop' : '● Record';
+  info.className = r.error && !r.on ? 'err' : '';
+  info.textContent = r.on ? L.recordLabel(r, performance.now()) : (r.error ? 'not recording: ' + r.error : '');
+}
+$('#rec').onclick = () => { if (S.record) sendNow(S.record.on ? L.msg.recordStop() : L.msg.recordStart()); };
+setInterval(renderRecord, 250);
 function renderLink() {
   const live = L.linkLive(S, performance.now()), l = latestLink(), n = $('#bpm'), p = $('#play');
   $('#linkst').textContent = L.linkLabel(live ? l : null) + ' ▾';

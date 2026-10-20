@@ -25,6 +25,7 @@ pub mod midi;
 pub mod pad;
 pub mod prng;
 pub mod rdns;
+pub mod record;
 pub mod replay;
 pub mod router;
 pub mod sync;

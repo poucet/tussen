@@ -71,6 +71,7 @@ use simply_osc::{Message, Value};
 
 use crate::console::{self, Event, Tap};
 use crate::generators::Generator;
+use crate::record::{self, Slot};
 use crate::take::Recorder;
 
 /// Everything published lives under this prefix.
@@ -396,7 +397,7 @@ pub struct LinkGenerator {
     config: LinkConfig,
     cmds: Receiver<LinkCmd>,
     tap: Option<Arc<Tap>>,
-    recorder: Option<Arc<Recorder>>,
+    recorder: Option<Slot>,
 }
 
 impl LinkGenerator {
@@ -405,8 +406,9 @@ impl LinkGenerator {
         LinkGenerator { config, cmds, tap, recorder: None }
     }
 
-    /// `run --record`: the published timeline goes into the take.
-    pub fn recording(mut self, recorder: Option<Arc<Recorder>>) -> LinkGenerator {
+    /// Recording on demand: the published timeline goes into whatever
+    /// take the slot holds, starting with the timeline as it is.
+    pub fn recording(mut self, recorder: Option<Slot>) -> LinkGenerator {
         self.recorder = recorder;
         self
     }
@@ -431,7 +433,7 @@ impl Generator for LinkGenerator {
         let rec = self.recorder.clone();
         std::thread::Builder::new()
             .name("simply-tussen link".into())
-            .spawn(move || run_link(&link, &config, &cmds, tap.as_deref(), rec.as_deref(), &out))?;
+            .spawn(move || run_link(&link, &config, &cmds, tap.as_deref(), rec.as_ref(), &out))?;
         Ok(())
     }
 }
@@ -481,10 +483,11 @@ fn run_link(
     config: &LinkConfig,
     cmds: &Receiver<LinkCmd>,
     tap: Option<&Tap>,
-    rec: Option<&Recorder>,
+    slot: Option<&Slot>,
     out: &Sender<Message>,
 ) {
     let mut taken = TimelineTake::default();
+    let mut rec: Option<Arc<Recorder>> = None;
     let clock = link.clock();
     let mut beats = Beats::default();
     let mut next_tick = clock.now();
@@ -535,7 +538,15 @@ fn run_link(
         }
 
         let now = clock.now();
-        if let Some(rec) = rec {
+        if let Some(slot) = slot {
+            let cur = record::current(slot);
+            if record::changed(&rec, &cur) {
+                // A new take: its timeline starts with the current one.
+                taken = TimelineTake::default();
+                rec = cur;
+            }
+        }
+        if let Some(rec) = &rec {
             taken.record(rec, &beat, mode, config.quantum, clock.instant(now), now);
         }
         if let Some(s) = sample(&beat, now) {

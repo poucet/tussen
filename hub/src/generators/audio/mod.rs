@@ -69,7 +69,7 @@ pub struct AudioLink {
     pub tap: OnceLock<Arc<crate::console::Tap>>,
     /// `run --record`: every packetized block and its stamp, handed to
     /// the recorder over wait-free rings.
-    pub rec: OnceLock<Mutex<crate::take::AudioRecTx>>,
+    pub rec: Mutex<Option<crate::take::AudioRecTx>>,
 }
 
 pub struct AudioGenerator {
@@ -276,7 +276,7 @@ fn sender_loop(cfg: &AudioConfig, link: &AudioLink, source: Source) {
         if ready {
             let made = Instant::now();
             packetizer.packet_into(&block, channels, ring.next_slot(made));
-            if let Some(Ok(mut rec)) = link.rec.get().map(Mutex::lock) {
+            if let Some(rec) = link.rec.lock().ok().as_mut().and_then(|g| g.as_mut()) {
                 rec.push(&block, made);
             }
             statics.send(link, &socket, &block, channels, packetizer.ssrc);

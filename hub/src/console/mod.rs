@@ -329,6 +329,15 @@ pub(crate) enum ClientMsg {
 /// returned [`RouterConsole`] to the hub loop and `console.tap` to the
 /// audio sender.
 pub fn start(opts: ConsoleOptions) -> anyhow::Result<(Console, RouterConsole)> {
+    start_with_record(opts, None)
+}
+
+/// [`start`], with the Record button: `record_start` / `record_stop`
+/// drive `record`, and `hello` carries its state.
+pub fn start_with_record(
+    opts: ConsoleOptions,
+    record: Option<Arc<crate::record::Control>>,
+) -> anyhow::Result<(Console, RouterConsole)> {
     let listener = server::bind(opts.port)?;
     let addr = listener.local_addr()?;
     let _ = now_us(); // pin the epoch before anything timestamps
@@ -361,6 +370,7 @@ pub fn start(opts: ConsoleOptions) -> anyhow::Result<(Console, RouterConsole)> {
             config: opts.config,
             sample_rate: opts.sample_rate,
             link: link_tx,
+            record,
         };
         let stop = Arc::clone(&stop);
         move || hub.run(&ev_rx, &ctl_rx, &inbox_rx, &stop)
@@ -387,6 +397,7 @@ struct ConsoleHub {
     config: Option<ConfigFile>,
     sample_rate: u32,
     link: Sender<crate::link::LinkCmd>,
+    record: Option<Arc<crate::record::Control>>,
 }
 
 impl ConsoleHub {
@@ -426,15 +437,18 @@ impl ConsoleHub {
 
     fn hello(&self) -> Arc<str> {
         let s = &self.state.sync;
-        protocol::hello(
+        let mut v = protocol::hello_value(
             &self.dests(),
             s.signal_delay_ms,
             s.td_round_trip_ms,
             &self.state.rules,
             self.sample_rate,
             &osc_endpoint(self.osc_port),
-        )
-        .into()
+        );
+        if let Some(r) = &self.record {
+            v["record"] = serde_json::json!(r.status());
+        }
+        v.to_string().into()
     }
 
     fn send_to(&self, client: &Client, frame: &Arc<str>) {
@@ -551,6 +565,23 @@ impl ConsoleHub {
                 if self.link.try_send(cmd).is_err() {
                     log::warn!("console: Link command dropped (no Link session)");
                 }
+            }
+            Request::RecordStart(name) => {
+                match &self.record {
+                    Some(r) => {
+                        if let Err(e) = r.start(name.as_deref()) {
+                            log::warn!("console: recording not started: {e:#}");
+                        }
+                    }
+                    None => log::warn!("console: this hub cannot record (replaying)"),
+                }
+                self.broadcast(self.hello());
+            }
+            Request::RecordStop => {
+                if let Some(r) = &self.record {
+                    r.stop();
+                }
+                self.broadcast(self.hello());
             }
             Request::Save => {
                 let reply = match &mut self.config {

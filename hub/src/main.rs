@@ -41,32 +41,44 @@ enum Command {
         /// Override the config's [audio] device ("" = the default output).
         #[arg(long)]
         audio_device: Option<String>,
-        /// Record everything the hub routes, its audio and the Link
-        /// timeline into a new take (optionally named) until the hub stops.
+        /// Start recording a take (optionally named) at launch. The
+        /// console's Record button starts and stops takes at any time.
         #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "")]
         record: Option<String>,
-        /// Play a take (a name in the takes directory, a path, or `latest`)
-        /// as if live, looping, instead of the hub's own MIDI, pad, audio and Link.
-        #[arg(long, value_name = "TAKE")]
-        replay: Option<String>,
         /// Where takes live. Default: $XDG_DATA_HOME/tussen/takes, else
         /// ~/.local/share/tussen/takes.
         #[arg(long)]
         takes_dir: Option<PathBuf>,
-        /// With --replay: loop bars A..B (from bar A's first beat to bar B's).
+    },
+    /// Replay a take as if live: the same hub as `run` (router,
+    /// destinations, devices, RTP, console), fed from the take instead of
+    /// this machine's MIDI, pad, audio and Link. Loops until stopped.
+    Replay {
+        /// `latest`, a take's name (or the end of it) in the takes directory, or a path.
+        take: String,
+        /// Loop bars A..B of the recorded timeline (from bar A's first beat to bar B's).
         #[arg(long = "loop", value_name = "A..B", value_parser = parse_bars)]
         loop_bars: Option<(u32, u32)>,
-        /// With --replay: start at this bar.
+        /// Start at this bar.
         #[arg(long = "from", value_name = "BAR")]
         from_bar: Option<u32>,
-        /// With --replay: play the audio this much ahead of the signals
-        /// (default: the take's final signal delay).
+        /// Play the audio this many ms ahead of the signals (default: the
+        /// take's final signal delay — as if the rig had a zero-latency mixer).
         #[arg(long)]
-        audio_lead_ms: Option<u32>,
-        /// With --replay: lead the Link session with the take's timeline
-        /// (found one if none), or leave Link alone.
+        offset_ms: Option<u32>,
+        /// Lead the Link session with the take's timeline (found one if
+        /// none), or leave Link alone.
         #[arg(long, value_enum, default_value_t = tussen_hub::replay::LinkMode::Lead)]
         replay_link: tussen_hub::replay::LinkMode,
+        /// The hub config, as for `run`.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Where takes live, as for `run`.
+        #[arg(long)]
+        takes_dir: Option<PathBuf>,
+        /// Print a stats line every second.
+        #[arg(long)]
+        stats: bool,
     },
     /// The recorded takes: name, date, length, size.
     Takes {
@@ -170,28 +182,29 @@ fn main() -> anyhow::Result<()> {
             fake_pad,
             audio_device,
             record,
-            replay,
             takes_dir,
-            loop_bars,
-            from_bar,
-            audio_lead_ms,
-            replay_link,
         } => {
             let env = Env::from_process()?;
             let config = ConfigFile::resolve(config, &env)?;
-            let takes = cmd::run::Takes {
+            let sources = cmd::run::Sources::Live {
+                fake_midi,
+                fake_pad,
+                audio_device,
                 record: record.map(|n| Some(n).filter(|n| !n.is_empty())),
-                replay,
-                dir: takes_dir.or_else(|| env.takes_dir()),
-                replay_opts: tussen_hub::replay::Options {
-                    loop_bars,
-                    from_bar,
-                    audio_lead_ms,
-                    link: replay_link,
-                    ..Default::default()
-                },
             };
-            cmd::run::run(config, fake_midi, fake_pad, audio_device.as_deref(), stats, takes)
+            cmd::run::serve(config, sources, stats, takes_dir.or_else(|| env.takes_dir()))
+        }
+        Command::Replay { take, loop_bars, from_bar, offset_ms, replay_link, config, takes_dir, stats } => {
+            let env = Env::from_process()?;
+            let config = ConfigFile::resolve(config, &env)?;
+            let opts = tussen_hub::replay::Options {
+                loop_bars,
+                from_bar,
+                audio_lead_ms: offset_ms,
+                link: replay_link,
+                ..Default::default()
+            };
+            cmd::run::serve(config, cmd::run::Sources::Replay { take, opts }, stats, takes_dir.or_else(|| env.takes_dir()))
         }
         Command::Takes { takes_dir } => {
             let env = Env::from_process()?;
