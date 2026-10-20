@@ -65,8 +65,11 @@ pub struct Options {
     pub loop_bars: Option<(u32, u32)>,
     /// Start at this bar (default: the loop's start, else the take's).
     pub from_bar: Option<u32>,
-    /// Override the take's audio lead (its final signal delay).
-    pub audio_lead_ms: Option<u32>,
+    /// Play the audio this many ms ahead of the signals (negative: behind),
+    /// instead of [`audio_lead_ms`]'s default.
+    pub audio_lead_ms: Option<i32>,
+    /// The signal delay the replaying hub starts with (its config's).
+    pub signal_delay_ms: u32,
     pub link: LinkMode,
     /// Where Link runs (tests: a private network).
     pub network: Network,
@@ -82,6 +85,7 @@ impl Default for Options {
             loop_bars: None,
             from_bar: None,
             audio_lead_ms: None,
+            signal_delay_ms: 0,
             link: LinkMode::Lead,
             network: Network::default(),
             link_wait: Duration::from_millis(1200),
@@ -300,6 +304,19 @@ impl Plan {
     }
 }
 
+/// How far ahead of the signals the recorded audio plays (D6, reconciled
+/// with the sync points). Live, a signal reached TD `D_rec` late and the
+/// music it caused reached the hub `M ≈ D_rec` late through the mixer: the
+/// take's audio carries that `M`. On replay the signals are delayed by the
+/// replaying hub's own signal delay `D_now`, so the audio must come
+/// `D_rec − D_now` early to meet them at TD (and, both held back by the
+/// round trip, at the devices). Same rig, unchanged sync points: 0, the
+/// audio exactly as recorded. A rig with no delay (a laptop alone): the
+/// whole `D_rec`, as if the mixer had no latency. `--offset-ms` overrides.
+pub fn audio_lead_ms(recorded_ms: u32, now_ms: u32, offset_ms: Option<i32>) -> i32 {
+    offset_ms.unwrap_or(recorded_ms as i32 - now_ms as i32)
+}
+
 /// Never re-fired on a seek or a seam (osc-signals.md's "event" entries).
 pub fn is_event(addr: &str) -> bool {
     addr == "/tussen/clock/onbeat" || ["/press", "/tap", "/recenter", "/onset"].iter().any(|e| addr.ends_with(e))
@@ -418,7 +435,11 @@ pub fn start(
     let end = take.meta.duration_us.max(1);
     let grid = Arc::new(Grid::new(&take.links, opts.quantum, end));
     let (start, a, b) = bounds(&grid, opts, end)?;
-    let lead_us = opts.audio_lead_ms.unwrap_or_else(|| take.signal_delay_ms()) as u64 * 1000;
+    let lead_ms = audio_lead_ms(take.signal_delay_ms(), opts.signal_delay_ms, opts.audio_lead_ms);
+    if lead_ms != 0 {
+        log::info!("replay: audio {} ms {} the signals (recorded signal delay {} ms, now {} ms)", lead_ms.abs(), if lead_ms > 0 { "ahead of" } else { "behind" }, take.signal_delay_ms(), opts.signal_delay_ms);
+    }
+    let lead_us = lead_ms as i64 * 1000;
 
     let link = match opts.link {
         LinkMode::Off => None,
@@ -663,7 +684,7 @@ struct Pacer {
     take: Arc<Take>,
     plan: Arc<Mutex<Plan>>,
     clock: HostClock,
-    lead_us: u64,
+    lead_us: i64,
     channels: usize,
     rate: f64,
     block: usize,
@@ -677,7 +698,7 @@ const RESYNC_FRAMES: i64 = 960;
 impl Pacer {
     /// The WAV frame for take time `t`, the audio lead applied.
     fn frame(&self, t: u64) -> u64 {
-        self.take.frame_at(t + self.lead_us).unwrap_or(0)
+        self.take.frame_at((t as i64 + self.lead_us).max(0) as u64).unwrap_or(0)
     }
 
     fn run(self, mut ring: rtrb::Producer<f32>, stop: &AtomicBool, link: &AudioLink) {
@@ -798,6 +819,14 @@ mod tests {
             p => panic!("{p:?}"),
         }
         assert!((plan.clock(5_500_000).beat - 11.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_audio_lead_keeps_audio_and_signals_together_at_td() {
+        assert_eq!(audio_lead_ms(60, 60, None), 0, "same rig: audio as recorded");
+        assert_eq!(audio_lead_ms(60, 0, None), 60, "no delay now: the mixer's latency comes off");
+        assert_eq!(audio_lead_ms(60, 80, None), -20, "a longer delay now: the audio waits");
+        assert_eq!(audio_lead_ms(60, 60, Some(15)), 15, "--offset-ms wins");
     }
 
     #[test]

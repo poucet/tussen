@@ -110,11 +110,17 @@ fn signed_ms(a: Instant, b: Instant) -> f64 {
 /// Replay `take` into a fresh hub with a registered device; returns
 /// (device, replay, hub) once the device is in.
 fn replay(take: Take, opts: Options, audio: bool) -> (Device, replay::Replay, hub::Hub, Arc<AudioLink>) {
+    replay_with(config(), take, opts, audio)
+}
+
+fn replay_with(config: Config, take: Take, mut opts: Options, audio: bool) -> (Device, replay::Replay, hub::Hub, Arc<AudioLink>) {
+    opts.signal_delay_ms = config.sync.signal_delay_ms;
+    let cfg = config.audio.clone();
     let link = Arc::new(AudioLink::default());
     let (rtx, rrx) = crossbeam_channel::bounded(4096);
     let (_g, grx) = crossbeam_channel::bounded::<Message>(1);
     let hub = hub::spawn_with_takes(
-        config(),
+        config,
         grx,
         true,
         Extras { audio: Some(Arc::clone(&link)), console: None },
@@ -122,7 +128,6 @@ fn replay(take: Take, opts: Options, audio: bool) -> (Device, replay::Replay, hu
     )
     .unwrap();
     let dev = Device::register(&hub, "shader");
-    let cfg = config().audio;
     let r = replay::start(Arc::new(take), &opts, rtx, audio.then(|| (cfg, Arc::clone(&link))), None).unwrap();
     (dev, r, hub, link)
 }
@@ -414,4 +419,103 @@ fn a_replay_leads_a_session_it_finds_on_that_sessions_bar_grid() {
     std::thread::sleep(Duration::from_millis(300));
     let e = phase_error(&app, &r);
     assert!(e.rem_euclid(4.0).min(4.0 - e.rem_euclid(4.0)) < 0.02, "bar phase matches the session's: {e}");
+}
+
+/// The visual path, tested with a replay: TouchDesigner (a `td`
+/// destination with an RTP port) and a device following TD both get the
+/// replayed signals and audio with the sync points as configured — the
+/// signal delay for both, the round trip on top for the device, audio
+/// undelayed to TD and held back by the round trip for the device — so
+/// signals and audio still meet at TD, and at the device as TD's NDI does.
+#[test]
+fn a_replay_drives_td_and_a_device_through_both_sync_points() {
+    // The take: a hit at 1.0 s; its music, through a mixer 60 ms late, in
+    // the audio at 1.06 s; recorded with the signal delay tuned to 60 ms.
+    let dir = tmp("visual");
+    let rec = Recorder::start(&dir, meta(), None).unwrap();
+    let t0 = rec.start_instant();
+    let at = |us: u64| t0 + Duration::from_micros(us);
+    rec.sync(t0, 60, 40);
+    rec.link(t0, 120.0, 0.0, true, 0, 4.0);
+    let mut tap = rec.audio_tap(512);
+    let packet_us = 256.0 * 1e6 / 48000.0;
+    for i in 0..375u64 {
+        let t = (i as f64 * packet_us) as u64;
+        let click = (1_060_000..1_060_000 + packet_us as u64).contains(&t);
+        tap.push(&vec![if click { 0.9 } else { 0.0 }; 512], at(t));
+        std::thread::sleep(Duration::from_micros(200)); // let the writer keep up
+    }
+    rec.osc(at(1_000_000), None, &Message::new("/ext/hit").arg(Value::Int32(1)));
+    rec.osc(at(1_990_000), None, &Message::new("/ext/end").arg(Value::Int32(0)));
+    rec.finish();
+    let take = Take::open(&dir).unwrap();
+    assert!(take.frames >= 375 * 256 - 256, "{} frames", take.frames);
+
+    // The same rig, sync points unchanged: 60 ms signal delay, 40 ms round trip.
+    let td_osc = Listener::bind("127.0.0.1:0").unwrap();
+    let td_rtp = UdpSocket::bind("127.0.0.1:0").unwrap();
+    td_rtp.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+    let config: Config = toml::from_str(&format!(
+        r#"
+        [osc]
+        listen_port = 0
+        device_timeout_ms = 60000
+        [sync]
+        signal_delay_ms = 60
+        td_round_trip_ms = 40
+        [[dest]]
+        name = "td"
+        host = "127.0.0.1"
+        port = {}
+        rtp_port = {}
+        subscribe = ["/ext/", "/tussen/"]
+        exclude = ["/tussen/hub/"]
+        "#,
+        td_osc.local_addr().port(),
+        td_rtp.local_addr().unwrap().port()
+    ))
+    .unwrap();
+    let td_hit = std::thread::spawn(move || {
+        let until = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < until {
+            if let Some(i) = td_osc.recv_timeout(Duration::from_millis(50)) {
+                if i.packet.messages().iter().any(|(_, m)| m.address == "/ext/hit") {
+                    return Some(Instant::now());
+                }
+            }
+        }
+        None
+    });
+    let td_click = std::thread::spawn(move || {
+        let mut buf = [0u8; 2048];
+        let until = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < until {
+            if let Ok((n, _)) = td_rtp.recv_from(&mut buf) {
+                if rtp::parse(&buf[..n]).is_some_and(|p| p.samples.iter().any(|s| *s > 0.5)) {
+                    return Some(Instant::now());
+                }
+            }
+        }
+        None
+    });
+    let (dev, r, _hub, link) = replay_with(config, take, off(), true);
+    std::thread::sleep(Duration::from_millis(1600));
+    drop(r);
+    link.stop.store(true, Ordering::Relaxed);
+    let td_hit = td_hit.join().unwrap().expect("TD got the replayed hit");
+    let td_click = td_click.join().unwrap().expect("TD got the replayed audio");
+    let dev_hit = dev.osc("/ext/hit")[0].0;
+    let dev_click = dev.rtp.lock().unwrap().iter().find(|p| p.1.samples.iter().any(|s| *s > 0.5)).expect("the device got the audio").0;
+
+    // At TD: the hit (delayed 60 ms) and its music (as recorded) together.
+    let at_td = signed_ms(td_click, td_hit);
+    assert!(at_td.abs() < 8.0, "at TD the music lands {at_td:.1} ms from its hit");
+    // At the device: both 40 ms behind TD, together.
+    let at_dev = signed_ms(dev_click, dev_hit);
+    assert!(at_dev.abs() < 8.0, "at the device the music lands {at_dev:.1} ms from its hit");
+    let rt = signed_ms(dev_hit, td_hit);
+    assert!((rt - 40.0).abs() < 6.0, "the device's signals run {rt:.1} ms behind TD's (round trip 40)");
+    let rt_audio = signed_ms(dev_click, td_click);
+    assert!((rt_audio - 40.0).abs() < 8.0, "the device's audio runs {rt_audio:.1} ms behind TD's");
+    let _ = std::fs::remove_dir_all(&dir);
 }

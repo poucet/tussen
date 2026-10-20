@@ -287,13 +287,31 @@ RTP and console, which opens in the browser), fed from the take.
   the take up with that session's bars. Tempo changes in the take are
   proposed as they come. `--replay-link off` leaves Link alone (then read
   the beat from `/tussen/clock/…`).
-- **The audio plays the take's signal delay early**, as if the rig had a
-  mixer with no latency, so the music lands on the beat it was played on
-  and the console's alignment strip reads 0. If the venue folded the
-  visuals' own audio path into the signal delay, the audio comes 30–50 ms
-  early: `--offset-ms <n>` sets the lead for one replay.
+- **Both sync points apply as live.** The take's audio plays early by the
+  take's signal delay minus this config's: on the rig that recorded it,
+  not at all, so TD and the devices get everything exactly as they did
+  live. On a laptop with no signal delay, by the whole recorded delay (as
+  if the mixer had no latency). `--offset-ms <n>` sets it for one replay
+  (negative: the audio comes later).
 - The console's top bar says `REPLAY <take> · bar x/y · loop a–b`, and its
   OSC feed marks replayed signals `src: "replay"`.
+
+### Test the visual path with a replay
+
+No band, no DJs, no live audio: a replay drives TouchDesigner live, TD
+sends its NDI to the devices as usual, and the devices composite it. NDI
+itself is never recorded (it doesn't pass the hub); TD makes it fresh.
+
+1. Use the room's config (`hub.toml` with the `td` destination, its
+   `rtp_port`, and the sync points set at soundcheck).
+2. `./simply-tussen replay latest --loop 9..17` on the hub laptop.
+3. TD: Link CHOP on (it follows the replay's session), the audio input on
+   the RTP stream as at a show, the OSC In as at a show. Its NDI goes to
+   the devices.
+4. Open the devices. They register, get the replayed signals and audio
+   with both sync points applied, and composite TD's NDI.
+5. Judge the alignment on a device exactly as in *Soundcheck* above. The
+   loop repeats the same bars, so there's time to adjust the round trip.
 
 ## If something's off
 

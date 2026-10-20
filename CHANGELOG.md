@@ -27,8 +27,11 @@
   `--from 13` starts at bar 13. Each seam restores the last value of every
   address, lets go of notes not held at the loop start, never re-fires
   events, and keeps the beat counting up in phase.
-- Audio plays the take's final signal delay ahead of the signals (no mixer
-  in a replay); `--offset-ms` overrides it.
+- **Both sync points apply during a replay, as live**, so a replay can
+  drive TouchDesigner and the devices to test the whole visual path (TD's
+  NDI to the devices stays live; NDI is never recorded). The take's audio
+  plays early by its recorded signal delay minus the current one: not at
+  all on the rig that recorded it. `--offset-ms` overrides.
 - `simply-tussen takes` lists takes; the console's top bar shows
   `REPLAY <take> · bar x/y · loop a–b`; the `link` frame gains `replay`,
   `hello` gains `record`, and the page sends `record_start` / `record_stop`.

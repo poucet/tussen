@@ -139,6 +139,7 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
             let (rtx, rrx) = crossbeam_channel::bounded(4096);
             let mut opts = opts.clone();
             opts.quantum = config.link.quantum;
+            opts.signal_delay_ms = config.sync.signal_delay_ms;
             doing = Some(format!(
                 "{:<19}→ {}{}{}",
                 "replaying",

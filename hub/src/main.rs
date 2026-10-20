@@ -62,10 +62,11 @@ enum Command {
         /// Start at this bar.
         #[arg(long = "from", value_name = "BAR")]
         from_bar: Option<u32>,
-        /// Play the audio this many ms ahead of the signals (default: the
-        /// take's final signal delay — as if the rig had a zero-latency mixer).
-        #[arg(long)]
-        offset_ms: Option<u32>,
+        /// Play the audio this many ms ahead of the signals (negative:
+        /// behind). Default: the take's final signal delay minus this
+        /// config's, so audio and signals meet at TD with the sync points as set.
+        #[arg(long, allow_hyphen_values = true)]
+        offset_ms: Option<i32>,
         /// Lead the Link session with the take's timeline (found one if
         /// none), or leave Link alone.
         #[arg(long, value_enum, default_value_t = tussen_hub::replay::LinkMode::Lead)]
