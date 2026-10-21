@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+#### Fix: lots of OSC no longer makes the console unresponsive · 2026-10-21
+
+- **`addrs` frames carry only what changed.** The hub used to send its whole
+  seen table twice a second, forever: 330 KB a frame at 2k addresses, 3 MB
+  at 18k, parsed and merged by every page each time (~11 ms a frame). A page
+  now gets the whole table once, on connect (`"full":true`), and after that
+  only the entries that changed (`"full":false`; merge by `addr`). With 200
+  active addresses out of 18k the frames went from 3.1 MB to 35 KB, and
+  applying one takes 0.1 ms. The frames go on the reliable channel, because
+  a lost diff would not heal on the next one. Consumers of the websocket:
+  see docs/guides/signals-websocket.md.
+- **The tables update row by row, and only what changed.** The remap list
+  and the osc tab's history and address set used to rebuild their whole
+  table (`innerHTML`, up to 800 rows) 2–4 times a second. Now a row is made
+  once and kept, a cell is written only when what it shows changed, and a
+  row moves only when it is out of place (a hot address jumping to the top
+  is one move; ten new history messages are about ten new rows, not 300).
+  A redraw with nothing new writes nothing. At 10k addresses: from 6,600
+  DOM writes a redraw down to the cells that changed, mostly the "ago"
+  column.
+- **Only what is on screen redraws, at a modest rate.** The remap list
+  redraws at 2 Hz on its own tab, no longer on every `addrs` frame as well.
+  The osc tab's history redraws at 4 Hz, and only when messages arrived.
+  Its address set redraws at 2 Hz. Each table also has to be in the
+  viewport. Nothing redraws while the page is hidden, and it catches up
+  when shown. The timeline canvas isn't painted while the osc tab shows.
+- **A lane's series is trimmed in batches.** It used to drop its oldest
+  sample on every message once it was 30 s old, an O(window) copy each
+  time. One address at 3 kHz went from 0.3 to 35 µs a message (~110 ms of
+  the page's main thread a second), starting half a minute in. Now it is
+  0.3 µs flat, bounded at 4/3 of the window.
+- **Only watched lanes keep a series.** With the osc tab open (`watch
+  "*"`), every address used to grow one nobody draws. The history still
+  gets every message. A lane you add starts empty, and a lane you remove
+  drops its data.
+- The "ago" columns no longer spread the whole address list into
+  `Math.max`, which throws past ~100k addresses.
+- Measured on a live hub: recording changes neither the hub's
+  websocket output nor its forwarding (p99 2.4 → 2.8 ms at 3k msg/s,
+  +6 % CPU on the record thread). It was the volume of OSC, and the Link
+  storm (next entry).
+
 #### Replay audio survives a Link storm · 2026-10-21
 
 - **Fixed: replay/RTP audio dropped ~45 % of its packets** while hubs on

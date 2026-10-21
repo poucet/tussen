@@ -642,7 +642,9 @@ impl Loop {
                 if now.duration_since(c.last_addrs) >= console::ADDRS_PERIOD {
                     c.last_addrs = now;
                     if c.link.tap.active() {
-                        c.link.tap.send(Event::Addrs(c.seen.snapshot(now)));
+                        // Reliable: a dropped delta would be lost until that address
+                        // changes again (a full list used to heal it 500 ms on).
+                        c.link.tap.control(Event::Addrs(c.seen.changes(now)));
                     }
                 }
             }

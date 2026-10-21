@@ -450,11 +450,22 @@ port = 0
     let m = expect(&mut ws, "midi", Duration::from_secs(2), |v| v["addr"] == "/tussen/midi/cc/7");
     assert_eq!(m["v"], 0.5);
 
-    // addrs: the seen table, newest first, at ~2 Hz.
-    let a = expect(&mut ws, "addrs", Duration::from_secs(2), |v| {
-        v["list"].as_array().is_some_and(|l| l.iter().any(|e| e["addr"] == "/ext/w"))
+    // addrs: at ~2 Hz, what changed in the seen table since the last frame,
+    // each frame sorted by address; merged by addr it is the whole table.
+    let merged = std::cell::RefCell::new(std::collections::BTreeMap::<String, Json>::new());
+    expect(&mut ws, "addrs", Duration::from_secs(3), |v| {
+        let l = v["list"].as_array().unwrap();
+        let addrs: Vec<&str> = l.iter().map(|e| e["addr"].as_str().unwrap()).collect();
+        let mut sorted = addrs.clone();
+        sorted.sort_unstable();
+        assert_eq!(addrs, sorted, "not address-sorted: {addrs:?}");
+        let mut m = merged.borrow_mut();
+        for e in l {
+            m.insert(e["addr"].as_str().unwrap().to_owned(), e.clone());
+        }
+        ["/ext/w", "/td/y", "/tussen/midi/cc/7"].iter().all(|a| m.contains_key(*a))
     });
-    let list = a["list"].as_array().unwrap();
+    let list: Vec<Json> = merged.into_inner().into_values().collect();
     assert!(list.iter().all(|e| e["last_ts"].is_u64() && e["rate"].is_number()));
     // Every entry carries its last value, min/max and total count (the
     // history tab's "all addresses" table); /ext/w was probed with 0.25,
@@ -477,13 +488,29 @@ port = 0
     assert_eq!(dir("/td/y"), Some(json!("out")), "remapped address in the set: {list:?}");
     assert_eq!(dir("/tussen/midi/cc/7"), Some(json!("out")), "generated signal: {list:?}");
     assert!(!list.iter().any(|e| e["addr"].as_str().unwrap().starts_with("/tussen/hub/")));
-    // The list is permanent and sorted by address, so it never reorders
-    // under traffic (addresses used to vanish past a cap and the page
-    // reshuffled on every snapshot).
-    let addrs: Vec<&str> = list.iter().map(|e| e["addr"].as_str().unwrap()).collect();
-    let mut sorted = addrs.clone();
+    // A page that joins now gets the whole table at once (`full`), sorted
+    // by address so it never reorders under traffic; nothing is evicted.
+    let mut late = connect(console.addr);
+    let f = expect(&mut late, "addrs", Duration::from_secs(2), |v| v["full"] == true);
+    let full: Vec<&str> = f["list"].as_array().unwrap().iter().map(|e| e["addr"].as_str().unwrap()).collect();
+    let mut sorted = full.clone();
     sorted.sort_unstable();
-    assert_eq!(addrs, sorted, "not address-sorted: {addrs:?}");
+    assert_eq!(full, sorted, "not address-sorted: {full:?}");
+    for a in ["/ext/w", "/td/y", "/tussen/midi/cc/7", "/ext/anything/at/all"] {
+        assert!(full.contains(&a), "{a} missing from the full list: {full:?}");
+    }
+    // Later frames carry only what changed: once the quiet addresses'
+    // rates have decayed to 0 (a few seconds at 2 Hz), a fresh message's
+    // frame leaves them out.
+    std::thread::sleep(Duration::from_secs(5));
+    probe("/ext/fresh");
+    let one = expect(&mut late, "addrs", Duration::from_secs(2), |v| {
+        v["list"].as_array().unwrap().iter().any(|e| e["addr"] == "/ext/fresh")
+    });
+    assert_eq!(one["full"], false);
+    let names: Vec<&str> = one["list"].as_array().unwrap().iter().map(|e| e["addr"].as_str().unwrap()).collect();
+    assert!(!names.contains(&"/ext/w"), "a quiet address is resent: {names:?}");
+    drop(late);
 
     // save: the file gets [sync] + [[remap]], its comment survives, and a
     // reload yields the live state.

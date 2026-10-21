@@ -323,7 +323,7 @@ function createState() {
   return {
     sampleRate: 48000, dests: [], sync: normSync(), remaps: [],
     audio: new AudioRing(8192), midi: [], osc: new Map(),
-    addrs: [], addrHeat: new Map(), addrLast: new Map(),
+    addrs: [], addrIdx: new Map(), addrHeat: new Map(), addrLast: new Map(),   // addrs: the hub's table, sorted; addrIdx: addr -> index
     watch: [], unsaved: false, saved: null, latestTs: 0,
     freshConnection: true, helloCount: 0,
     links: [], linkAtMs: -Infinity,    // recent `link` messages (ts ascending); local ms of the last
@@ -340,7 +340,7 @@ function createState() {
 // One live message into the history ring (amortized splice).
 function histPush(s, e) {
   const h = s.history;
-  h.buf.push(e); h.total++;
+  e.n = h.total++; h.buf.push(e);   // n: the message's number, a history row's key
   if (h.buf.length > HISTORY_CAP + 512) h.buf.splice(0, h.buf.length - HISTORY_CAP);
 }
 // Newest first, filtered by address substring, at most `limit` rows.
@@ -377,10 +377,23 @@ function pushSeries(s, addr, ts, v, src) {
   let ser = s.osc.get(addr);
   if (!ser) { ser = { ts: [], v: [], src: src }; s.osc.set(addr, ser); }
   ser.ts.push(ts); ser.v.push(v); ser.src = src;
-  if (ser.ts.length > 64 && ser.ts[0] < ts - KEEP_US) {
-    let k = 0; while (k < ser.ts.length && ser.ts[k] < ts - KEEP_US) k++;
+  // Trim in batches: only once a quarter of the series is older than KEEP_US,
+  // so each splice removes >= n/4 and a message costs O(1) amortized. (A
+  // splice per message cost O(window) each: a 3 kHz address took ~110 ms of
+  // main thread a second, starting 30 s in.) Bounded at ~4/3 of the window;
+  // draw() binary-searches past the stale head.
+  const n = ser.ts.length;
+  if (n > 64 && ser.ts[n >> 2] < ts - KEEP_US) {
+    let k = n >> 2; while (k < n && ser.ts[k] < ts - KEEP_US) k++;
     ser.ts.splice(0, k); ser.v.splice(0, k);
   }
+}
+// The newest last_ts the addrs list knows, for the "ago" columns (a loop:
+// spreading the list into Math.max throws past ~100k addresses).
+function latestSeenTs(s) {
+  let m = s.latestTs;
+  for (const a of s.addrs) if (a.last_ts > m) m = a.last_ts;
+  return m;
 }
 function resetBuffers(s) { s.audio.clear(); s.midi.length = 0; s.osc.clear(); s.latestTs = 0; s.links.length = 0; s.linkAtMs = -Infinity; s.linkPeers = []; }
 // --- Link peers (the dropdown under the peer count) ---------------------------
@@ -442,6 +455,19 @@ function peerSummary(peers) {
 }
 function linkLive(s, localMs) { return s.links.length > 0 && localMs - s.linkAtMs < LINK_STALE_MS; }
 
+// Merge changed entries into s.addrs (sorted by address), in place: a known
+// address is replaced at its index, new ones are inserted and the index rebuilt.
+function mergeAddrs(s, list) {
+  let fresh = false;
+  for (const a of list) {
+    const i = s.addrIdx.get(a.addr);
+    if (i === undefined) { s.addrs.push(a); fresh = true; } else s.addrs[i] = a;
+  }
+  if (fresh) {
+    s.addrs.sort((a, b) => (a.addr < b.addr ? -1 : a.addr > b.addr ? 1 : 0));
+    s.addrIdx = new Map(s.addrs.map((a, i) => [a.addr, i]));
+  }
+}
 // Apply one hub->page message. Returns the message type when handled, else null.
 function applyMessage(s, m, localMs) {
   if (!m || typeof m.t !== 'string') return null;
@@ -480,7 +506,9 @@ function applyMessage(s, m, localMs) {
       histPush(s, { ts: m.ts, addr: m.addr, v: m.v, src: m.src });
       // MIDI-class lanes are fed from `midi` (every MIDI signal arrives there),
       // so an `osc` copy of one would draw it twice.
-      if (signalClass(m.addr) !== 'midi') pushSeries(s, m.addr, m.ts, m.v, m.src);
+      // Only the lanes keep a series: watch "*" (the osc tab) feeds the
+      // history above, not a series per address.
+      if (signalClass(m.addr) !== 'midi' && s.watch.includes(m.addr)) pushSeries(s, m.addr, m.ts, m.v, m.src);
       s.latestTs = Math.max(s.latestTs, m.ts);
       return 'osc';
     case 'addrs': {
@@ -489,6 +517,9 @@ function applyMessage(s, m, localMs) {
       // >1 s of silence (or appears after the first list) heats up and stays
       // hot while it keeps moving. Steady streams never heat.
       const first = s.addrs.length === 0 && s.addrLast.size === 0;
+      // A `full` frame (a page's first; an older hub sends nothing else) is
+      // the whole table; the rest carry only what changed, merged by addr.
+      const full = m.full !== false;
       for (const a of list) {
         const prev = s.addrLast.get(a.addr);
         const hot = localMs - (s.addrHeat.has(a.addr) ? s.addrHeat.get(a.addr) : -Infinity) < HEAT_MS;
@@ -496,7 +527,8 @@ function applyMessage(s, m, localMs) {
         s.addrLast.set(a.addr, a.last_ts);
         s.addrSeen.set(a.addr, a);   // accumulate: an address that drops off the list stays here
       }
-      s.addrs = list;
+      if (full) { s.addrs = list.slice(); s.addrIdx = new Map(s.addrs.map((a, i) => [a.addr, i])); }
+      else mergeAddrs(s, list);
       return 'addrs';
     }
     case 'link': {
@@ -529,6 +561,60 @@ function sortedAddrs(list, filter, heat, localMs) {
   const h = (a) => isHot(heat, a.addr, localMs) ? 1 : 0;
   out.sort((a, b) => h(b) - h(a) || (a.addr < b.addr ? -1 : a.addr > b.addr ? 1 : 0));
   return out;
+}
+// --- tables, row by row ----------------------------------------------------
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
+function fmtV(v) { return typeof v === 'number' ? (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(3)) : esc(v); }
+function agoText(ref, ts) { return Math.max(0, (ref - ts) / 1e6).toFixed(1); }
+// One remap-list row: {key, cls, cells: [[html, class], …]}. c = {now, heat, watch, remaps, ref}.
+function addrRow(a, c) {
+  const cls = signalClass(a.addr), w = c.watch.includes(a.addr), rm = c.remaps.some(r => matchPattern(r.from, a.addr));
+  return { key: a.addr, cls: (isHot(c.heat, a.addr, c.now) ? 'hot ' : '') + (w ? 'w' : ''), cells: [
+    [(w ? '★ ' : '') + esc(a.addr) + (rm ? ' <span class="dim">⇢</span>' : ''), 'addr'], [cls, 'cls-' + cls], [(+a.rate).toFixed(1), ''],
+    [a.min == null ? '—' : fmtV(a.min), 'v'], [a.max == null ? '—' : fmtV(a.max), 'v'], [agoText(c.ref, a.last_ts), '']] };
+}
+// One row of the osc tab's address set.
+function seenRow(a, ref) {
+  const cls = signalClass(a.addr), n = (x) => (x == null ? '—' : fmtV(x));
+  return { key: a.addr, cls: '', cells: [[esc(a.addr), 'addr'], [esc(a.dir || '—'), ''], [cls, 'cls-' + cls], [a.count == null ? '—' : String(a.count), 'v'],
+    [n(a.min), 'v'], [n(a.v), 'v'], [n(a.max), 'v'], [agoText(ref, a.last_ts), 'v']] };
+}
+// Bring tbody to `rows` touching only what differs: a row is made once per
+// key and kept (tbody._rows), moved only when out of place, and a cell is
+// written only when its html or class changed. A rebuild of the whole table
+// (innerHTML) at 2–4 Hz re-parsed and re-laid-out every row of it, every time.
+// doc: anything with createElement (the page's document; a fake in tests).
+function patchRows(tbody, rows, doc) {
+  const cache = tbody._rows || (tbody._rows = new Map()), keep = new Set();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]; keep.add(r.key);
+    let e = cache.get(r.key);
+    if (!e) { e = { tr: doc.createElement('tr'), tds: [], cls: null }; e.tr.setAttribute('data-a', r.key); cache.set(r.key, e); }
+    if (e.cls !== r.cls) { e.tr.className = r.cls; e.cls = r.cls; }
+    for (let j = 0; j < r.cells.length; j++) {
+      let td = e.tds[j];
+      if (!td) { td = e.tds[j] = { el: doc.createElement('td'), html: null, cls: null }; e.tr.appendChild(td.el); }
+      const [html, cls] = r.cells[j];
+      if (td.html !== html) { td.el.innerHTML = html; td.html = html; }
+      if (td.cls !== cls) { td.el.className = cls; td.cls = cls; }
+    }
+    if (tbody.children[i] !== e.tr) tbody.insertBefore(e.tr, tbody.children[i] || null);
+  }
+  for (const [k, e] of cache) if (!keep.has(k)) { tbody.removeChild(e.tr); cache.delete(k); }
+}
+// One live-history row, keyed by the message's number: a redraw makes rows
+// only for messages that arrived since the last one.
+function histRow(e) {
+  const cls = signalClass(e.addr);
+  return { key: e.n, cls: '', cells: [[(e.ts / 1e6).toFixed(2), 'v'], [esc(e.addr), 'addr cls-' + cls], [fmtV(e.v), 'v'], [esc(e.src), 'dim']] };
+}
+// What to redraw: only what is on screen — the sync tab's remap list, or the
+// osc tab's history (unless paused) and address set — and nothing while the
+// page is hidden (another tab, minimised) or the table is scrolled out of
+// view (o.onScreen: {addrs, hist, seen}, false = not in the viewport).
+function renderPlan(o) {
+  const on = !o.hidden, see = o.onScreen || {};
+  return { addrs: on && !o.oscTab && see.addrs !== false, history: on && o.oscTab && !o.histPaused && see.hist !== false, seen: on && o.oscTab && see.seen !== false };
 }
 // `*` matches exactly one segment.
 function matchPattern(pattern, addr) {
@@ -605,6 +691,7 @@ function applyLocalEdit(s, m) {
     s.remaps = s.remaps.filter(x => x.id !== m.id);
   } else if (m.t === 'watch') {
     s.watch = m.addrs.slice();
+    for (const a of s.osc.keys()) if (!s.watch.includes(a)) s.osc.delete(a);   // an unwatched lane's series goes with it
   }
   if (m.t === 'set_sync' || m.t === 'set_follow' || m.t === 'remap_upsert' || m.t === 'remap_delete') s.unsaved = true;
 }
@@ -722,6 +809,7 @@ function createMockHub(opts) {
   const seen = new Map();     // addr -> {last_ts, hits: [ts...], v, count}
   const errors = [];          // protocol violations from the page
   const out = [];
+  const sentAddrs = new Map();   // addr -> the entry last sent (JSON), for `addrs` diffs
   const touch = (addr, ts, v, dir) => { let e = seen.get(addr); if (!e) { e = { last_ts: ts, hits: [], v: 0, min: v, max: v, count: 0, dirs: 0 }; seen.set(addr, e); } e.last_ts = ts; e.v = v; e.min = Math.min(e.min, v); e.max = Math.max(e.max, v); e.count++; e.dirs |= dir; e.hits.push(ts); if (e.hits.length > 400) e.hits.splice(0, 200); };
   const MOCK_OSC = { port: 9000, ips: ['192.0.2.10'], hostname: 'mock-hub.local' };
   const recordMsg = () => {
@@ -802,15 +890,17 @@ function createMockHub(opts) {
     if (questPresent) for (const e of beatTimesIn(a, b, -o.oscLeadMs * 1000 + 80e3)) if (e.k % 2 === 0) { emitOsc(e.ts, '/tussen/quest/controller/trigger', 0, 'quest'); }
     if (b - lastAddrs >= 500e3) {
       lastAddrs = b;
-      // Like the real hub: permanent (nothing drops out) and sorted by
-      // address, with min/max per entry.
-      const list = [];
+      // Like the real hub: permanent (nothing drops out), sorted by address,
+      // min/max per entry; the first frame `full`, then only what changed.
+      const list = [], full = sentAddrs.size === 0;
       for (const [addr, e] of seen) {
         let n = 0; for (let i = e.hits.length - 1; i >= 0 && e.hits[i] > b - 1e6; i--) n++;
-        list.push({ addr: addr, last_ts: e.last_ts, rate: n, v: e.v, min: e.min, max: e.max, count: e.count, dir: e.dirs === 1 ? 'in' : e.dirs === 2 ? 'out' : 'both' });
+        const a = { addr: addr, last_ts: e.last_ts, rate: n, v: e.v, min: e.min, max: e.max, count: e.count, dir: e.dirs === 1 ? 'in' : e.dirs === 2 ? 'out' : 'both' };
+        const key = JSON.stringify(a);
+        if (full || sentAddrs.get(addr) !== key) { list.push(a); sentAddrs.set(addr, key); }
       }
       list.sort((a, b2) => (a.addr < b2.addr ? -1 : a.addr > b2.addr ? 1 : 0));
-      out.push({ t: 'addrs', list: list });
+      if (full || list.length) out.push({ t: 'addrs', full: full, list: list });
     }
     lastUs = b;
     return out.splice(0, out.length);
@@ -874,7 +964,7 @@ const api = {
   signalClass, clampDelay, signalDelayMs, audioDelayMs, shiftTs,
   timeToX, xToTime, zoomView, gridStepMs, blockDurUs,
   AudioRing, midiKind, createState, resetBuffers, applyMessage, sortedAddrs, isHot, HEAT_MS, matchPattern,
-  HISTORY_CAP, histPush, historyRows, seenRows, endpointText, endpointLines,
+  HISTORY_CAP, histPush, historyRows, latestSeenTs, esc, fmtV, addrRow, seenRow, histRow, patchRows, renderPlan, seenRows, endpointText, endpointLines,
   DEST_STATES, DEST_STATUS_STALE_MS, normDestStatus, destStatusCell, destSummary,
   msg, isTempId, parseRuleForm, applyLocalEdit, detectOnsets, alignStats, beatAnchor, createMockHub,
 };
@@ -887,6 +977,7 @@ else root.TC = api;
 (function () {
 'use strict';
 const L = window.TC;
+const esc = L.esc, fmtV = L.fmtV;
 const $ = (s) => document.querySelector(s);
 const S = L.createState();
 const params = new URLSearchParams(location.search);
@@ -922,7 +1013,6 @@ function onHubText(text) {
   if (t === 'hello') { if (S.helloCount === 1 || connJustOpened) { connJustOpened = false; sendNow(watchMsg()); } rebuildDests(); renderRules(); renderUnsaved(); renderEndpoint(); renderRecord(); }
   else if (t === 'dests') rebuildDests();
   else if (t === 'dest_status') renderDestStatus();
-  else if (t === 'addrs') renderAddrs();
   else if (t === 'saved') { renderSaved(); renderUnsaved(); }
   else if (t === 'link') renderLink();
 }
@@ -1117,21 +1207,22 @@ $('#deststat').addEventListener('click', showDests);
 $('#deststat').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); showDests(); } });
 
 // ---- addresses / rules -------------------------------------------------------
-function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
+// What is on screen decides what redraws (L.renderPlan): the tab, the page's
+// visibility, and whether each table is in the viewport at all.
+const onScreen = { addrs: true, hist: true, seen: true };
+function plan() { return L.renderPlan({ oscTab: oscTab, hidden: document.hidden, histPaused: histPaused, onScreen: onScreen }); }
+function renderVisible() { renderAddrs(); renderHistory(); renderSeen(); }   // each checks the plan itself
+if (typeof IntersectionObserver === 'function') {
+  const io = new IntersectionObserver((entries) => { for (const e of entries) onScreen[e.target.id] = e.isIntersecting; renderVisible(); });
+  for (const id of ['addrs', 'hist', 'seen']) io.observe($('#' + id));
+}
 function renderAddrs() {
+  if (!plan().addrs) return;
   const now = performance.now(), list = L.sortedAddrs(S.addrs, $('#filter').value, S.addrHeat, now);
-  const ref = Math.max(S.latestTs, ...S.addrs.map(a => a.last_ts));
-  const lim = Math.min(list.length, 300);
-  let h = '';
-  for (let i = 0; i < lim; i++) {
-    const a = list[i], cls = L.signalClass(a.addr);
-    const hot = L.isHot(S.addrHeat, a.addr, now);
-    const w = S.watch.includes(a.addr);
-    const rm = S.remaps.some(r => L.matchPattern(r.from, a.addr));
-    h += '<tr data-a="' + esc(a.addr) + '" class="' + (hot ? 'hot ' : '') + (w ? 'w' : '') + '"><td class="addr">' + (w ? '★ ' : '') + esc(a.addr) + (rm ? ' <span class="dim">⇢</span>' : '') +
-      '</td><td class="cls-' + cls + '">' + cls + '</td><td>' + (+a.rate).toFixed(1) + '</td><td class="v">' + (a.min == null ? '—' : fmtV(a.min)) + '</td><td class="v">' + (a.max == null ? '—' : fmtV(a.max)) + '</td><td>' + Math.max(0, (ref - a.last_ts) / 1e6).toFixed(1) + '</td></tr>';
-  }
-  $('#addrs tbody').innerHTML = h;
+  const c = { now: now, heat: S.addrHeat, watch: S.watch, remaps: S.remaps, ref: L.latestSeenTs(S) };
+  const lim = Math.min(list.length, 300), rows = [];
+  for (let i = 0; i < lim; i++) rows.push(L.addrRow(list[i], c));
+  L.patchRows($('#addrs tbody'), rows, document);
   $('#acount').textContent = list.length + ' / ' + S.addrs.length + (list.length > lim ? ' (first ' + lim + ')' : '');
 }
 $('#addrs').addEventListener('click', (ev) => {
@@ -1189,32 +1280,32 @@ $('#epcopy').onclick = () => {
 
 // ---- osc tab: live history + every address seen --------------------------------
 let histPaused = false;
-function fmtV(v) { return typeof v === 'number' ? (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(3)) : esc(v); }
+let histDrawn = null;   // [total, filter] of the last history redraw: nothing new, nothing to do
 function renderHistory() {
-  const LIMIT = 300, rows = L.historyRows(S, $('#histfilter').value, LIMIT);
-  let h = '';
-  for (const e of rows) {
-    const cls = L.signalClass(e.addr);
-    h += '<tr><td class="v">' + (e.ts / 1e6).toFixed(2) + '</td><td class="addr cls-' + cls + '">' + esc(e.addr) + '</td><td class="v">' + fmtV(e.v) + '</td><td class="dim">' + esc(e.src) + '</td></tr>';
-  }
-  $('#hist tbody').innerHTML = h;
+  if (!plan().history) return;
+  const f = $('#histfilter').value;
+  if (histDrawn && histDrawn[0] === S.history.total && histDrawn[1] === f) return;
+  histDrawn = [S.history.total, f];
+  const LIMIT = 300, rows = L.historyRows(S, f, LIMIT);
+  L.patchRows($('#hist tbody'), rows.map(L.histRow), document);
   $('#histcount').textContent = S.history.total + ' messages' + (rows.length === LIMIT ? ' (newest ' + LIMIT + ' shown)' : '');
 }
 function renderSeen() {
+  if (!plan().seen) return;
   const rows = L.seenRows(S, $('#seenfilter').value);
-  const ref = Math.max(S.latestTs, ...S.addrs.map(a => a.last_ts));
-  const lim = Math.min(rows.length, 500);
-  let h = '';
-  for (let i = 0; i < lim; i++) {
-    const a = rows[i], cls = L.signalClass(a.addr);
-    h += '<tr><td class="addr">' + esc(a.addr) + '</td><td>' + esc(a.dir || '—') + '</td><td class="cls-' + cls + '">' + cls + '</td><td class="v">' + (a.count == null ? '—' : a.count) + '</td><td class="v">' + (a.min == null ? '—' : fmtV(a.min)) + '</td><td class="v">' + (a.v == null ? '—' : fmtV(a.v)) + '</td><td class="v">' + (a.max == null ? '—' : fmtV(a.max)) + '</td><td class="v">' + Math.max(0, (ref - a.last_ts) / 1e6).toFixed(1) + '</td></tr>';
-  }
-  $('#seen tbody').innerHTML = h;
+  const ref = L.latestSeenTs(S);
+  const lim = Math.min(rows.length, 500), out = [];
+  for (let i = 0; i < lim; i++) out.push(L.seenRow(rows[i], ref));
+  L.patchRows($('#seen tbody'), out, document);
   $('#seencount').textContent = rows.length + ' address' + (rows.length === 1 ? '' : 'es') + (lim < rows.length ? ' (first ' + lim + ')' : '');
 }
-// Batched DOM: the ring fills at any rate; the tables redraw at 4 Hz, only
-// while the tab is visible (and the history only while not paused).
-setInterval(() => { if (!oscTab) return; if (!histPaused) renderHistory(); renderSeen(); }, 250);
+// Batched DOM: the ring fills at any rate; the history redraws at 4 Hz, the
+// address tables at 2 Hz (the hub's addrs rate; also fades the heat), each
+// only while on screen, and only the rows and cells that changed.
+setInterval(renderHistory, 250);
+setInterval(() => { renderAddrs(); renderSeen(); }, 500);
+// Back on screen: catch up at once rather than on the next tick.
+document.addEventListener('visibilitychange', renderVisible);
 $('#histpause').onclick = () => { histPaused = !histPaused; const b = $('#histpause'); b.textContent = histPaused ? '▶ live' : '⏸ pause'; b.classList.toggle('on', histPaused); if (!histPaused) renderHistory(); };
 $('#histfilter').addEventListener('input', renderHistory);
 $('#seenfilter').addEventListener('input', renderSeen);
@@ -1223,7 +1314,8 @@ function setTab(osc) {
   document.body.classList.toggle('tab-osc', osc);
   $('#tab-osc').classList.toggle('on', osc); $('#tab-sync').classList.toggle('on', !osc);
   pending.set('watch', watchMsg());   // '*' on while the history is visible, off when it isn't
-  if (osc) { renderHistory(); renderSeen(); } else sizeCanvas();
+  if (!osc) sizeCanvas();
+  renderVisible();
 }
 $('#tab-sync').onclick = () => setTab(false);
 $('#tab-osc').onclick = () => setTab(true);
@@ -1340,6 +1432,7 @@ window.addEventListener('mouseup', () => { if (awDrag) { awDrag = null; aw.class
 
 function draw() {
   flush();
+  if (oscTab) { requestAnimationFrame(draw); return; }   // the timeline is not on screen
   if (!paused) view.endUs = hubNowUs() - 40e3;    // 40 ms behind live: the newest audio batch has arrived
   const dSig = sigMs();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1471,7 +1564,6 @@ window.addEventListener('keydown', (ev) => {
 });
 // any delay edit marks unsaved
 document.addEventListener('input', () => renderUnsaved()); document.addEventListener('click', () => setTimeout(renderUnsaved, 0));
-setInterval(renderAddrs, 500);   // keep the heat highlight fading even if addrs pause
 
 sizeCanvas(); renderRules(); renderUnsaved();
 if (MOCK) connectMock(); else connectWs();

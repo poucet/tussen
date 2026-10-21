@@ -8,6 +8,8 @@
 //    time<->pixel math, the mock hub's message shapes and lead/lag behaviour,
 //    and that every page->hub message matches the protocol table (owned HERE, not
 //    imported from the page, so the page can't grade its own homework).
+// 3. runs the real page (<script id="ui">) in a fake browser (fakedom.js) under
+//    load and counts its DOM writes: only what is on screen, only what changed.
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os'), vm = require('vm'), cp = require('child_process');
 
@@ -175,7 +177,7 @@ const HUB_SPEC = {
   audio: ['ts', 'blocks'],
   midi: ['ts', 'addr', 'v'],
   osc: ['ts', 'addr', 'v', 'src'],
-  addrs: ['list'],
+  addrs: ['full', 'list'],
   saved: ['ok'],
   link: ['ts', 'beat', 'bpm', 'quantum', 'playing', 'mode', 'peers', 'peer_list'],
   dest_status: ['list'],
@@ -237,7 +239,25 @@ ok(Math.abs(run.S.audio.count - 25 * 48000 / 256) < 5, 'block count = 187.5/s', 
 // reorders, and every entry carries min ≤ v ≤ max
 const lists = run.msgs.filter(m => m.t === 'addrs').map(m => m.list.map(a => a.addr));
 ok(lists.every(l => l.join() === l.slice().sort().join()), 'every addrs list arrives sorted by address');
-ok(lists.every((l, i) => i === 0 || lists[i - 1].every(a => l.includes(a))), 'the list only grows; nothing ever drops out');
+{ // the first addrs frame is the whole table; the rest only what changed, and merged they only grow
+  const fr = run.msgs.filter(m => m.t === 'addrs');
+  ok(fr[0].full === true && fr.slice(1).every(m => m.full === false), 'addrs: first frame full, then diffs', fr.map(m => m.full));
+  ok(fr.slice(1).some(m => m.list.length < run.S.addrs.length), 'a diff frame leaves unchanged addresses out', fr.map(m => m.list.length));
+  const merged = new Set(); let grows = true;
+  for (const m of fr) { const n = merged.size; for (const a of m.list) merged.add(a.addr); grows = grows && merged.size >= n; }
+  ok(grows && run.S.addrs.length === merged.size, 'merged, the table only grows; nothing ever drops out', { page: run.S.addrs.length, merged: merged.size });
+  ok(run.S.addrs.map(a => a.addr).join() === [...merged].sort().join(), 'the page holds the merged table, sorted');
+}
+{ // applying diffs: replaced in place, new ones sorted in, a full frame replaces
+  const Sd = L.createState(), e = (addr, v) => ({ addr, last_ts: 1, rate: 1, v, min: 0, max: 1, count: 1, dir: 'in' });
+  L.applyMessage(Sd, { t: 'addrs', full: true, list: [e('/b', 0.1), e('/d', 0.2)] }, 0);
+  L.applyMessage(Sd, { t: 'addrs', full: false, list: [e('/a', 0.3), e('/d', 0.9)] }, 500);
+  ok(Sd.addrs.map(a => a.addr + '=' + a.v).join() === '/a=0.3,/b=0.1,/d=0.9', 'diff merged by addr, sorted', Sd.addrs);
+  L.applyMessage(Sd, { t: 'addrs', full: false, list: [e('/b', 0.5)] }, 1000);
+  ok(Sd.addrs[1].v === 0.5 && Sd.addrs.length === 3, 'a known address is replaced in place');
+  L.applyMessage(Sd, { t: 'addrs', full: true, list: [e('/z', 1)] }, 1500);
+  ok(Sd.addrs.length === 1 && Sd.addrSeen.size === 4, 'a full frame (a restarted hub) replaces the table; addrSeen keeps all');
+}
 ok(run.msgs.filter(m => m.t === 'addrs').every(m => m.list.every(a => a.min <= a.v && a.v <= a.max)), 'min ≤ last value ≤ max on every entry');
 { // min/max accumulate over an address's whole life
   const knob = run.msgs.filter(m => m.t === 'addrs').map(m => m.list.find(a => a.addr === '/ext/sensor/knob')).filter(Boolean).pop();
@@ -275,6 +295,113 @@ ok(run.S.oscEndpoint && run.S.oscEndpoint.port === 9000 && run.S.oscEndpoint.ips
   for (let i = 0; i < L.HISTORY_CAP + 2000; i++) L.applyMessage(Sh, { t: 'osc', ts: 10 + i, addr: '/x', v: i, src: 's' }, 0);
   ok(Sh.history.buf.length <= L.HISTORY_CAP + 512 && Sh.history.total === L.HISTORY_CAP + 2002, 'ring capped, total keeps counting', Sh.history.buf.length);
   ok(L.historyRows(Sh, '', 5).length === 5 && L.historyRows(Sh, '', 5)[0].v === L.HISTORY_CAP + 1999, 'limit + newest kept');
+}
+{ // a lane's series: only watched addresses get one, and trimming is batched —
+  // a per-message splice made a hot address cost O(window) per message once
+  // it was KEEP_US old (Chris: "very unresponsive … lots of osc signals")
+  const Ss = L.createState(); Ss.watch = ['/ext/hot'];
+  const rate = 3000, stepUs = 1e6 / rate, n = Math.ceil((L.KEEP_US / 1e6 + 30) * rate), win = L.KEEP_US / stepUs;
+  let trims = 0, prev = 0, maxLen = 0;
+  for (let i = 0; i < n; i++) {
+    L.applyMessage(Ss, { t: 'osc', ts: 1e6 + i * stepUs, addr: '/ext/hot', v: 0.5, src: 's' }, 0);
+    L.applyMessage(Ss, { t: 'osc', ts: 1e6 + i * stepUs, addr: '/ext/other' + (i % 50), v: 0.5, src: 's' }, 0);
+    const len = Ss.osc.get('/ext/hot').ts.length; if (len <= prev) trims++;   // a push that didn't grow the series trimmed it
+    prev = len; maxLen = Math.max(maxLen, len);
+  }
+  ok(Ss.osc.size === 1, 'only watched addresses get a series ("*" feeds the history, not the lanes)', [...Ss.osc.keys()].slice(0, 3));
+  ok(trims > 0 && trims <= 20, 'a hot series is trimmed in batches, not per message', trims);
+  ok(maxLen <= Math.ceil(win * 4 / 3) + 64 && prev >= win - 1, 'series stays bounded and keeps the window', { maxLen, prev, win });
+  ok(Ss.history.total === 2 * n, 'every message still lands in the history');
+  L.applyLocalEdit(Ss, L.msg.watch([]));
+  ok(Ss.osc.size === 0, 'unwatching a lane drops its series');
+}
+{ // tables row by row (patchRows on a fake DOM): a redraw writes only what changed
+  let writes = 0, moves = 0;
+  const el = (tag) => {
+    const e = { tag, children: [], parent: null, attrs: {}, _html: '', _cls: '',
+      get innerHTML() { return this._html; }, set innerHTML(v) { writes++; this._html = v; },
+      get className() { return this._cls; }, set className(v) { writes++; this._cls = v; },
+      setAttribute(k, v) { this.attrs[k] = v; },
+      appendChild(c) { return this.insertBefore(c, null); },
+      insertBefore(c, ref) { if (c.parent) c.parent.children.splice(c.parent.children.indexOf(c), 1); const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); c.parent = this; if (this.tag === 'tbody') moves++; return c; },
+      removeChild(c) { this.children.splice(this.children.indexOf(c), 1); c.parent = null; moves++; return c; } };
+    return e;
+  };
+  const doc = { createElement: el }, tb = el('tbody');
+  const list = Array.from({ length: 300 }, (_, i) => ({ addr: '/ext/a' + String(i).padStart(3, '0'), last_ts: 1e6, rate: 2, v: 0.5, min: 0, max: 1, count: 3, dir: 'in' }));
+  const ctx = (now, heat) => ({ now, heat: heat || new Map(), watch: ['/ext/a007'], remaps: [{ from: '/ext/*' }], ref: 2e6 });
+  const rows = (c, l) => (l || list).map(a => L.addrRow(a, c));
+  L.patchRows(tb, rows(ctx(0)), doc);
+  const cellText = (r, j) => r.children[j]._html;
+  ok(tb.children.length === 300 && tb.children[7].attrs['data-a'] === '/ext/a007' && /★/.test(cellText(tb.children[7], 0)) && /⇢/.test(cellText(tb.children[0], 0)), 'patchRows builds the table (watch star, remap arrow)');
+  writes = 0; moves = 0;
+  L.patchRows(tb, rows(ctx(0)), doc);
+  ok(writes === 0 && moves === 0, 'nothing changed: a redraw writes nothing', { writes, moves });
+  const l2 = list.slice(); l2[42] = Object.assign({}, l2[42], { max: 2 });
+  L.patchRows(tb, rows(ctx(0), l2), doc);
+  ok(writes === 1 && moves === 0 && cellText(tb.children[42], 4) === '2.000', 'one value changed: one cell written', { writes, moves });
+  writes = 0;
+  const heat = new Map([['/ext/a200', 0]]), hot = L.sortedAddrs(l2, '', heat, 10);
+  L.patchRows(tb, hot.map(a => L.addrRow(a, ctx(10, heat))), doc);
+  ok(moves === 1 && writes === 1 && tb.children[0].attrs['data-a'] === '/ext/a200' && tb.children[0]._cls === 'hot ', 'a hot row jumps to the top: one move, one class', { writes, moves });
+  moves = 0;
+  L.patchRows(tb, hot.slice(0, 100).map(a => L.addrRow(a, ctx(10, heat))), doc);
+  ok(tb.children.length === 100 && moves === 200 && tb._rows.size === 100, 'rows that fall off are removed', { n: tb.children.length, moves });
+  const sr = L.seenRow({ addr: '/x<y>', dir: 'in', count: 4, v: 0.25, min: 0, max: 1, last_ts: 0 }, 1.5e6);
+  ok(sr.cells.map(c => c[0]).join('|') === '/x&lt;y&gt;|in|osc|4|0.000|0.250|1.000|1.5', 'seenRow: escaped address, values, ago', sr.cells);
+}
+{ // only what is on screen redraws, nothing while the page is hidden
+  const p = (oscTab, hidden, histPaused) => { const r = L.renderPlan({ oscTab, hidden, histPaused }); return [r.addrs, r.history, r.seen].map(Number).join(''); };
+  ok(p(false, false, false) === '100' && p(true, false, false) === '011' && p(true, false, true) === '001', 'renderPlan: the visible tab only; a paused history stays');
+  ok(p(false, true, false) === '000' && p(true, true, false) === '000', 'renderPlan: a hidden page renders nothing');
+}
+{ // the real page (<script id="ui">) in a fake browser (fakedom.js) at ~10k addresses and
+  // 5k msg/s: the DOM is written only for what is on screen, and only when it changed
+  section('page under load (fake DOM)');
+  const { fakeBrowser } = require('./fakedom.js');
+  const b = fakeBrowser(), ctx = vm.createContext(b.globals);
+  vm.runInContext(script('logic'), ctx); vm.runInContext(script('ui'), ctx);
+  b.open();
+  b.recv({ t: 'hello', sync: { signal_delay_ms: 0, td_round_trip_ms: 0 }, dests: [], remaps: [], sample_rate: 48000, osc: { port: 9000, ips: [] }, record: { on: false, elapsed_ms: 0 } });
+  const N = 10000, entry = (i, ts, v) => ({ addr: '/ext/n/' + String(i).padStart(5, '0'), last_ts: ts, rate: 5, v, min: 0, max: 1, count: 1, dir: 'in' });
+  b.recv({ t: 'addrs', full: true, list: Array.from({ length: N }, (_, i) => entry(i, 1e6, 0.5)) });
+  let ts = 1e6, k = 0, handlerMs = 0, msgs = 0;
+  const second = (n) => {   // one second of traffic: 5k osc frames over the 10k addresses + 2 addrs diffs
+    for (let half = 0; half < 2; half++) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < 2500; i++) { ts += 200; b.recv({ t: 'osc', ts, addr: '/ext/n/' + String(k++ % N).padStart(5, '0'), v: Math.random(), src: '192.0.2.5:9000' }); }
+      handlerMs += Number(process.hrtime.bigint() - t0) / 1e6; msgs += 2500;
+      if (n) b.recv({ t: 'addrs', full: false, list: Array.from({ length: 200 }, (_, i) => entry((k + i) % N, ts, Math.random())) });
+      b.advance(500);
+    }
+  };
+  second(true);
+  ok(b.writes('#addrs tbody') > 0 && b.writes('#hist tbody') === 0 && b.writes('#seen tbody') === 0, 'sync tab: only the remap list is drawn', { addrs: b.writes('#addrs tbody'), hist: b.writes('#hist tbody'), seen: b.writes('#seen tbody') });
+  ok(b.rows('#addrs tbody').length === 300, 'the remap list shows its first 300 rows', b.rows('#addrs tbody').length);
+  b.advance(3000); b.resetWrites(); b.advance(1000);
+  ok(b.writes('#addrs tbody') === 0, 'nothing changed: the remap list is not touched', b.writes('#addrs tbody'));
+  b.click('#tab-osc'); b.resetWrites(); second(true);
+  ok(b.writes('#hist tbody') > 0 && b.writes('#seen tbody') > 0 && b.writes('#addrs tbody') === 0, 'osc tab: history + address set drawn, the remap list not', { addrs: b.writes('#addrs tbody'), hist: b.writes('#hist tbody'), seen: b.writes('#seen tbody') });
+  ok(b.rows('#hist tbody').length === 300 && b.rows('#seen tbody').length === 500, 'history 300 rows, address set 500', [b.rows('#hist tbody').length, b.rows('#seen tbody').length]);
+  b.setHidden(true); b.resetWrites(); second(true); second(true);
+  ok(b.writes('#hist tbody') + b.writes('#seen tbody') + b.writes('#addrs tbody') + b.writes('#histcount') === 0, 'page hidden: no DOM writes at all for the tables', { hist: b.writes('#hist tbody'), seen: b.writes('#seen tbody') });
+  b.setHidden(false);
+  ok(b.writes('#hist tbody') > 0 && b.writes('#seen tbody') > 0, 'shown again: drawn at once');
+  b.intersect('hist', false); b.resetWrites(); second(true);
+  ok(b.writes('#hist tbody') === 0 && b.writes('#seen tbody') > 0, 'history scrolled out of view: not drawn; the address set still is');
+  b.intersect('hist', true); b.resetWrites(); b.advance(250); b.resetWrites(); b.advance(1000);
+  ok(b.writes('#hist tbody') === 0, 'no new messages: the history is not touched', b.writes('#hist tbody'));
+  b.resetWrites(); for (let i = 0; i < 10; i++) { ts += 200; b.recv({ t: 'osc', ts, addr: '/ext/n/00001', v: 0.25, src: 's' }); } b.advance(250);
+  ok(b.writes('#hist tbody') > 0 && b.writes('#hist tbody') <= 10 * 9 + 20, 'ten new messages: about ten rows written, not 300', b.writes('#hist tbody'));
+  b.click('#tab-sync'); b.resetWrites(); second(true);
+  ok(b.writes('#hist tbody') === 0 && b.writes('#seen tbody') === 0, 'back on the sync tab: the osc tables are left alone');
+  const us = handlerMs * 1000 / msgs;
+  ok(us < 40, 'per-message cost at 5k msg/s stays small (µs, whole onmessage path)', +us.toFixed(1));
+}
+{ // the newest last_ts without spreading the whole list into Math.max (a RangeError past ~100k addresses)
+  const many = Array.from({ length: 200000 }, (_, i) => ({ addr: '/a' + i, last_ts: i }));
+  let r = null; try { r = L.latestSeenTs({ latestTs: 5, addrs: many }); } catch (e) { r = e.message; }
+  ok(r === 199999, 'latestSeenTs over 200k addresses', r);
 }
 // the accumulated address table never forgets, even though the mock's addrs
 // list drops stale entries (the real hub's doesn't)

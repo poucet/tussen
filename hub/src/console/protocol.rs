@@ -84,8 +84,12 @@ pub fn osc(ts: u64, addr: &str, v: f32, src: &str) -> String {
     json!({ "t": "osc", "ts": ts, "addr": addr, "v": v, "src": src }).to_string()
 }
 
-pub fn addrs(list: &[AddrInfo]) -> String {
-    json!({ "t": "addrs", "list": list }).to_string()
+/// `full`: every address since hub start (a page's first frame); else only
+/// the entries that changed since the last frame, which the page merges by
+/// `addr` (docs/guides/signals-websocket.md).
+pub fn addrs<'a>(list: impl IntoIterator<Item = &'a AddrInfo>, full: bool) -> String {
+    let list: Vec<&AddrInfo> = list.into_iter().collect();
+    json!({ "t": "addrs", "full": full, "list": list }).to_string()
 }
 
 pub fn link(s: &crate::link::LinkStatus) -> String {
@@ -270,9 +274,9 @@ mod tests {
         let o: Value = serde_json::from_str(&osc(9, "/ext/x", 1.0, "127.0.0.1:5")).unwrap();
         assert_eq!(o, json!({"t":"osc","ts":9,"addr":"/ext/x","v":1.0,"src":"127.0.0.1:5"}));
         let l: Value =
-            serde_json::from_str(&addrs(&[AddrInfo { addr: "/x".into(), last_ts: 4, rate: 2.5, v: 0.5, min: -0.5, max: 1.5, count: 12, dir: "in" }]))
+            serde_json::from_str(&addrs(&[AddrInfo { addr: "/x".into(), last_ts: 4, rate: 2.5, v: 0.5, min: -0.5, max: 1.5, count: 12, dir: "in" }], false))
                 .unwrap();
-        assert_eq!(l, json!({"t":"addrs","list":[{"addr":"/x","last_ts":4,"rate":2.5,"v":0.5,"min":-0.5,"max":1.5,"count":12,"dir":"in"}]}));
+        assert_eq!(l, json!({"t":"addrs","full":false,"list":[{"addr":"/x","last_ts":4,"rate":2.5,"v":0.5,"min":-0.5,"max":1.5,"count":12,"dir":"in"}]}));
         let k: Value = serde_json::from_str(&link(&crate::link::LinkStatus {
             ts: 5,
             beat: 2.5,

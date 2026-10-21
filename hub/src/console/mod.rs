@@ -25,7 +25,7 @@ mod server;
 pub use protocol::{parse_request, OscEndpoint, Request};
 pub use save::{save, save_config, write_into};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -45,7 +45,7 @@ const CLIENT_CAPACITY: usize = 1024;
 /// address this hub run has routed); past this many it logs one warning,
 /// because that cardinality means some sender is minting addresses.
 pub const SEEN_WARN: usize = 65536;
-/// How often the router publishes the seen-address list (~2 Hz).
+/// How often the router publishes what changed in the seen-address list (~2 Hz).
 pub const ADDRS_PERIOD: Duration = Duration::from_millis(500);
 /// How long the audio sender batches blocks before publishing (~30 Hz).
 pub const AUDIO_BATCH: Duration = Duration::from_millis(33);
@@ -152,8 +152,11 @@ pub struct RouterConsole {
 
 /// The router's table of every address it has seen.
 /// Permanent for the life of the process: nothing is ever evicted, so the
-/// list never loses a quiet address, and the snapshot is sorted by address
-/// so it never reorders under traffic.
+/// list never loses a quiet address. Each [`changes`](SeenTable::changes)
+/// hands over only the entries that changed since the last one (sorted by
+/// address); the console thread keeps the whole list for a page that joins.
+/// A full list every 500 ms grew with the address count, forever: 3 MB a
+/// frame at 18k addresses, parsed by every page twice a second.
 pub struct SeenTable {
     map: HashMap<String, Seen>,
     warned: bool,
@@ -169,6 +172,11 @@ struct Seen {
     min: f32,
     max: f32,
     dirs: u8,
+    /// Noted since the last `changes`.
+    dirty: bool,
+    /// The (rounded) rate last handed over: a quiet address is sent again
+    /// only while its rate decays to 0.
+    sent_rate: f32,
 }
 
 fn dir_str(dirs: u8) -> &'static str {
@@ -204,6 +212,7 @@ impl SeenTable {
             s.min = s.min.min(v);
             s.max = s.max.max(v);
             s.dirs |= dir;
+            s.dirty = true;
             return;
         }
         if self.map.len() >= SEEN_WARN && !self.warned {
@@ -216,33 +225,40 @@ impl SeenTable {
         }
         self.map.insert(
             addr.to_owned(),
-            Seen { last_us: us, count: 1, total: 1, rate: 0.0, v, min: v, max: v, dirs: dir },
+            Seen { last_us: us, count: 1, total: 1, rate: 0.0, v, min: v, max: v, dirs: dir, dirty: true, sent_rate: f32::NAN },
         );
     }
 
-    /// Every address, sorted by address — a stable order, so the page's
-    /// list never shuffles — with its message rate over the time since
-    /// the last snapshot (lightly smoothed).
-    pub fn snapshot(&mut self, now: Instant) -> Vec<AddrInfo> {
+    /// The addresses that changed since the last call — noted, or their
+    /// rate moved — sorted by address, each with its message rate over the
+    /// time since the last call (lightly smoothed). The first call has
+    /// every address.
+    pub fn changes(&mut self, now: Instant) -> Vec<AddrInfo> {
         let secs = now.duration_since(self.last).as_secs_f32().max(1e-3);
         self.last = now;
         let mut list: Vec<AddrInfo> = self
             .map
             .iter_mut()
-            .map(|(addr, s)| {
+            .filter_map(|(addr, s)| {
                 let inst = s.count as f32 / secs;
                 s.rate = if s.rate == 0.0 { inst } else { 0.5 * s.rate + 0.5 * inst };
                 s.count = 0;
-                AddrInfo {
+                let rate = (s.rate * 10.0).round() / 10.0;
+                if !s.dirty && rate == s.sent_rate {
+                    return None;
+                }
+                s.dirty = false;
+                s.sent_rate = rate;
+                Some(AddrInfo {
                     addr: addr.clone(),
                     last_ts: s.last_us,
-                    rate: (s.rate * 10.0).round() / 10.0,
+                    rate,
                     v: s.v,
                     min: s.min,
                     max: s.max,
                     count: s.total,
                     dir: dir_str(s.dirs),
-                }
+                })
             })
             .collect();
         list.sort_by(|a, b| a.addr.cmp(&b.addr));
@@ -377,6 +393,7 @@ pub fn start_with_record(
             link: link_tx,
             record,
             dest_status: None,
+            addrs: BTreeMap::new(),
         };
         let stop = Arc::clone(&stop);
         move || hub.run(&ev_rx, &ctl_rx, &inbox_rx, &stop)
@@ -406,6 +423,9 @@ struct ConsoleHub {
     record: Option<Arc<crate::record::Control>>,
     /// The last `dest_status` frame, for a page that joins between two.
     dest_status: Option<Arc<str>>,
+    /// Every address the router has handed over, merged: a joining page's
+    /// first `addrs` frame (`full`); the others get only what changed.
+    addrs: BTreeMap<String, AddrInfo>,
 }
 
 impl ConsoleHub {
@@ -481,6 +501,12 @@ impl ConsoleHub {
     }
 
     fn event(&mut self, ev: Event) {
+        if let Event::Addrs(changed) = &ev {
+            // Merged with or without pages, so a joiner's full list is whole.
+            for a in changed {
+                self.addrs.insert(a.addr.clone(), a.clone());
+            }
+        }
         if self.clients.is_empty() && !matches!(ev, Event::Devices(_)) {
             return;
         }
@@ -491,7 +517,11 @@ impl ConsoleHub {
             }
             Event::Audio { ts, blocks } => self.broadcast(protocol::audio(ts, &blocks).into()),
             Event::Midi { ts, addr, v } => self.broadcast(protocol::midi(ts, &addr, v).into()),
-            Event::Addrs(list) => self.broadcast(protocol::addrs(&list).into()),
+            Event::Addrs(list) => {
+                if !list.is_empty() {
+                    self.broadcast(protocol::addrs(&list, false).into());
+                }
+            }
             Event::Link(status) => self.broadcast(protocol::link(&status).into()),
             Event::DestStatus(list) => {
                 let frame: Arc<str> = protocol::dest_status(&list).into();
@@ -516,6 +546,9 @@ impl ConsoleHub {
                 self.send_to(&c, &self.hello());
                 if let Some(f) = &self.dest_status {
                     self.send_to(&c, f);
+                }
+                if !self.addrs.is_empty() {
+                    self.send_to(&c, &protocol::addrs(self.addrs.values(), true).into());
                 }
                 self.clients.insert(id, c);
                 self.tap.clients.store(self.clients.len(), Ordering::Relaxed);
@@ -638,7 +671,7 @@ mod tests {
         t.note("/a", 40, 0.4, DIR_IN);
         t.note("/d", 50, 0.5, DIR_IN);
         assert_eq!(t.len(), 4); // nothing is ever evicted
-        let list = t.snapshot(Instant::now());
+        let list = t.changes(Instant::now());
         let addrs: Vec<&str> = list.iter().map(|a| a.addr.as_str()).collect();
         assert_eq!(addrs, ["/a", "/b", "/c", "/d"]); // by address, not by activity
         assert_eq!(list[0].last_ts, 40);
@@ -647,11 +680,11 @@ mod tests {
         // after a burst as before it.
         t.note("/d", 60, 0.9, DIR_IN);
         t.note("/d", 61, 0.9, DIR_IN);
-        let list = t.snapshot(Instant::now());
+        let list = t.changes(Instant::now());
         let addrs: Vec<&str> = list.iter().map(|a| a.addr.as_str()).collect();
-        assert_eq!(addrs, ["/a", "/b", "/c", "/d"]);
-        // The last value and the total survive the snapshot (the rate
-        // window resets; the count never does).
+        assert_eq!(addrs, ["/a", "/b", "/c", "/d"]); // the quiet ones' rates are decaying
+        // The last value and the total survive (the rate window resets;
+        // the count never does).
         let a = list.iter().find(|x| x.addr == "/a").unwrap();
         assert_eq!((a.v, a.count), (0.4, 1));
         let d = list.iter().find(|x| x.addr == "/d").unwrap();
@@ -659,16 +692,36 @@ mod tests {
     }
 
     #[test]
+    fn only_what_changed_is_handed_over() {
+        let mut t = SeenTable::new();
+        for i in 0..1000 {
+            t.note(&format!("/many/{i:04}"), 1, 0.0, DIR_IN);
+        }
+        assert_eq!(t.changes(Instant::now()).len(), 1000, "the first call has every address");
+        // Quiet addresses are sent while their rate decays to 0, then never.
+        for _ in 0..64 {
+            t.changes(Instant::now());
+        }
+        assert!(t.changes(Instant::now()).is_empty(), "a quiet table keeps sending");
+        // One busy address among a thousand quiet ones: one entry.
+        t.note("/many/0500", 2, 0.7, DIR_IN);
+        let list = t.changes(Instant::now());
+        assert_eq!(list.len(), 1);
+        assert_eq!((list[0].addr.as_str(), list[0].v, list[0].count), ("/many/0500", 0.7, 2));
+        assert_eq!(t.len(), 1000, "nothing is evicted");
+    }
+
+    #[test]
     fn an_address_tracks_the_min_and_max_of_its_values() {
         let mut t = SeenTable::new();
         t.note("/x", 1, 0.5, DIR_IN);
-        let list = t.snapshot(Instant::now());
+        let list = t.changes(Instant::now());
         // The first value initialises both.
         assert_eq!((list[0].min, list[0].max), (0.5, 0.5));
         t.note("/x", 2, -0.25, DIR_IN);
         t.note("/x", 3, 2.0, DIR_IN);
         t.note("/x", 4, 1.0, DIR_IN);
-        let list = t.snapshot(Instant::now());
+        let list = t.changes(Instant::now());
         assert_eq!((list[0].min, list[0].max), (-0.25, 2.0));
         assert_eq!(list[0].v, 1.0);
     }
@@ -681,7 +734,7 @@ mod tests {
         t.note("/both", 3, 0.0, DIR_IN);
         t.note("/both", 4, 0.0, DIR_OUT);
         let dir = |list: &[AddrInfo], a: &str| list.iter().find(|x| x.addr == a).unwrap().dir;
-        let list = t.snapshot(Instant::now());
+        let list = t.changes(Instant::now());
         assert_eq!(dir(&list, "/in"), "in");
         assert_eq!(dir(&list, "/out"), "out");
         assert_eq!(dir(&list, "/both"), "both");
