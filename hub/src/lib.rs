@@ -23,6 +23,7 @@ pub mod generators;
 pub mod hub;
 pub mod link;
 pub mod midi;
+pub mod ndi;
 pub mod pad;
 pub mod prng;
 pub mod rdns;

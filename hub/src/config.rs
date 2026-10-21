@@ -38,6 +38,9 @@ pub struct Config {
     /// Ableton Link: waited for and joined, or started from the console.
     #[serde(default)]
     pub link: crate::link::LinkConfig,
+    /// NDI in from TouchDesigner, served to local pages on the console's `/ndi`.
+    #[serde(default)]
+    pub ndi: crate::ndi::NdiConfig,
 }
 
 /// `[console]`: the page + WebSocket, on loopback only.

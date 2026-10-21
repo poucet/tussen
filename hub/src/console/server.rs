@@ -128,6 +128,26 @@ fn connection(mut stream: TcpStream, port: u16, inbox: &Sender<ClientMsg>, next_
     }
     match path {
         "/" | "/index.html" => respond(&mut stream, "200 OK", "text/html; charset=utf-8", PAGE)?,
+        "/ndi.js" => respond_cors(&mut stream, "text/javascript; charset=utf-8", NDI_JS)?,
+        "/ndi" => {
+            let upgrade = header("upgrade").is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
+            let Some(key) = header("sec-websocket-key").filter(|_| upgrade) else {
+                return respond(&mut stream, "426 Upgrade Required", "text/plain", "websocket only\n")
+                    .map_err(Into::into);
+            };
+            if origin_access(header("origin"), port).is_none() {
+                log::warn!("console: refused /ndi from origin {:?}", header("origin"));
+                return respond(&mut stream, "403 Forbidden", "text/plain", "foreign origin\n").map_err(Into::into);
+            }
+            let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
+            write!(
+                stream,
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+            )?;
+            stream.flush()?;
+            let leftover = buf[head_len..].to_vec();
+            ndi_feed(WebSocket::from_partially_read(stream, leftover, Role::Server, None))?;
+        }
         "/ws" => {
             let upgrade = header("upgrade").is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
             let Some(key) = header("sec-websocket-key").filter(|_| upgrade) else {
@@ -153,6 +173,37 @@ fn connection(mut stream: TcpStream, port: u16, inbox: &Sender<ClientMsg>, next_
         _ => respond(&mut stream, "404 Not Found", "text/plain", "not found\n")?,
     }
     Ok(())
+}
+
+/// The page-side NDI helper (`hub/console/ndi.js`).
+pub const NDI_JS: &str = include_str!("../../console/ndi.js");
+
+/// A script any loopback page may load cross-origin.
+fn respond_cors(stream: &mut TcpStream, ctype: &str, body: &str) -> std::io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )?;
+    stream.flush()
+}
+
+/// One `/ndi` connection: the newest frame each time the last one is
+/// written (latest frame wins; a slow page drops frames). Page messages
+/// are ignored; a write error or close ends it.
+fn ndi_feed(mut ws: WebSocket<TcpStream>) -> anyhow::Result<()> {
+    ws.get_mut().set_nodelay(true)?;
+    ws.get_mut().set_write_timeout(Some(Duration::from_secs(2)))?;
+    let feed = crate::ndi::feed();
+    let mut seen = 0;
+    loop {
+        let Some((seq, frame)) = feed.next(seen, Duration::from_secs(1)) else {
+            ws.send(Message::Ping(Vec::new().into()))?;
+            continue;
+        };
+        seen = seq;
+        ws.send(Message::binary(frame.as_slice().to_vec()))?;
+    }
 }
 
 /// One page's session: read its commands, write what the console thread

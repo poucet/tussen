@@ -14,7 +14,7 @@
 8. **Iteration is a bar-aligned A–B loop** that replays the state at A on every pass, so a shader sees a consistent world each time.
 9. **Link** (settled: built with S1): while replaying, the hub **leads** the local Link session with the take's timeline. It founds a session if none exists, and otherwise places the take on that session's bar grid and proposes the take's tempo. TD's Link CHOP and Ableton follow. `--replay-link off` leaves Link alone.
 10. **Built for the hackathon**: the console's Record button (or `run --record [NAME]` at launch), then `simply-tussen replay <take|latest> [--loop A..B] [--from BAR]` loops in real time.
-11. **NDI is out**: the hub never carries it, so a take cannot hold it.
+11. **NDI is out** of takes: the hub now receives NDI live and serves it to local pages ([guide](../guides/ndi.md), 2026-10-21), but a take does not hold it yet.
 
 Numbers, measurements and prior art: [docs/research/replay-numbers.md](../research/replay-numbers.md).
 Claims carry □ (follows from the code or arithmetic), ◇ (possible or measured; evidence named), 🚫 (impossible here; the lever named).

@@ -722,7 +722,7 @@ dependencies = [
  "combine",
  "java-locator",
  "jni-sys 0.3.1",
- "libloading",
+ "libloading 0.7.4",
  "log",
  "thiserror 1.0.69",
  "walkdir",
@@ -827,6 +827,16 @@ checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
 dependencies = [
  "cfg-if",
  "winapi",
+]
+
+[[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
 ]
 
 [[package]]
@@ -1463,6 +1473,7 @@ dependencies = [
  "env_logger",
  "gilrs",
  "httparse",
+ "libloading 0.8.9",
  "log",
  "rtrb",
  "serde",

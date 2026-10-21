@@ -176,6 +176,15 @@ enum Command {
         #[arg(long, default_value_t = 2)]
         channels: u16,
     },
+    /// List the NDI sources visible from this machine (TD's NDI Out TOP),
+    /// using the config's [ndi] extra_ips. Put one in [ndi] source.
+    Ndi {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// How long to look, in seconds.
+        #[arg(long, default_value_t = 3)]
+        wait: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -252,6 +261,17 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Sdp { to, sample_rate, channels } => cmd::sdp::run(&to, sample_rate, channels),
         Command::List => cmd::list::run(),
+        Command::Ndi { config, wait } => {
+            let config = tussen_hub::config::Config::from_file(&ConfigFile::resolve(config, &Env::from_process()?)?)?;
+            let names = tussen_hub::ndi::list(&config.ndi, std::time::Duration::from_secs(wait))?;
+            if names.is_empty() {
+                println!("no NDI sources found (TD: an NDI Out TOP; another subnet: [ndi] extra_ips = \"<TD laptop IP>\")");
+            }
+            for n in names {
+                println!("{n}");
+            }
+            Ok(())
+        }
         Command::Config { action: ConfigAction::Path { config } } => {
             println!("{}", ConfigFile::resolve(config, &Env::from_process()?)?);
             Ok(())

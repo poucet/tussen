@@ -94,6 +94,16 @@ refresh_ms = 500
 tempo = 120
 quantum = 4
 
+# NDI in: TD's NDI Out TOP on the TD laptop, received here and served to
+# local WebGL pages on ws://127.0.0.1:9098/ndi (docs/guides/ndi.md). Needs
+# the NDI runtime (NDI Tools, https://ndi.video/tools/). `simply-tussen ndi`
+# lists the sources this machine sees.
+[ndi]
+enabled = false
+source = ""        # a substring of the NDI name, e.g. "TouchDesigner"; "" = first found
+extra_ips = ""     # the TD laptop's IP, if mDNS discovery doesn't cross the network
+bandwidth = "highest"
+
 # The two sync points and remap rules: set them in the console and press
 # Save; it writes them here, keeping these comments. Solo on one machine the
 # mix needs no delay, so both start at 0; with a real room, set them on the

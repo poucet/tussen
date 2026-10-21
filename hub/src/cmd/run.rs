@@ -155,6 +155,13 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
             }
         }
     }
+    // NDI in (TD's NDI Out → the console's /ndi). Failing to start is a
+    // warning: the show runs without video.
+    if config.ndi.enabled {
+        if let Err(e) = tussen_hub::ndi::start(config.ndi.clone()) {
+            log::warn!("ndi: {e:#}");
+        }
+    }
     // Ableton Link: the console's tempo/start-stop in, the beat grid out.
     let (link_cmds, link_tap) = match &_console {
         Some(c) => (c.link_cmds.clone(), Some(Arc::clone(&c.tap))),

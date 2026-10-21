@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+#### NDI in, to WebGL · 2026-10-21
+
+- **`[ndi]`**: the hub receives one NDI source (TD's NDI Out TOP, from the
+  TD laptop) and serves it on the console's **`/ndi`** WebSocket, latest
+  frame wins, each frame stamped on the hub clock. **`/ndi.js`** turns it
+  into an RGBA WebGL texture (UYVY converted on the GPU).
+  **`simply-tussen ndi`** lists visible sources. The NDI runtime is loaded
+  at run time; a hub without it builds and runs. Not recorded in takes yet.
+
 #### Share a take as one zip · 2026-10-21 07:34 · yklrmwpl
 
 - **`simply-tussen export <take> [-o FILE] [--no-audio]`** writes a take as

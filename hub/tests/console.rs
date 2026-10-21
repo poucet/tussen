@@ -624,3 +624,37 @@ fn a_second_local_page_reads_the_feed_but_cannot_command() {
     drop(hub);
     drop(console);
 }
+
+#[test]
+fn ndi_frames_reach_a_local_page_newest_first() {
+    let (console, _router_side) = console::start(ConsoleOptions {
+        port: 0,
+        osc_port: 9000,
+        config: None,
+        statics: Vec::new(),
+        sample_rate: 48000,
+        state: SyncState::new(Default::default(), Vec::new()),
+    })
+    .unwrap();
+    // A shader page on another loopback port may read the feed.
+    let mut ws = connect_as(console.addr, "/ndi", Some("http://localhost:5173"));
+    let rows = [[16u8, 235, 128, 235]];
+    let mut got = None;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while got.is_none() && Instant::now() < deadline {
+        tussen_hub::ndi::feed().publish(tussen_hub::ndi::encode(*b"UYVY", 2, 1, 7, rows.iter()));
+        if let Ok(tungstenite::Message::Binary(b)) = ws.read() {
+            got = Some(b);
+        }
+    }
+    let b = got.expect("no /ndi frame");
+    assert_eq!(&b[..8], b"TNDIUYVY");
+    assert_eq!(&b[24..], &rows[0]);
+    // The helper script is served to any page.
+    use std::io::{Read, Write};
+    let mut s = TcpStream::connect(console.addr).unwrap();
+    s.write_all(b"GET /ndi.js HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+    let mut body = String::new();
+    s.read_to_string(&mut body).unwrap();
+    assert!(body.contains("Access-Control-Allow-Origin: *") && body.contains("TussenNDI"), "{body}");
+}

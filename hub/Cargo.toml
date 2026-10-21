@@ -43,6 +43,9 @@ rtrb = "0.3"
 tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 httparse = "1"
 serde_json = "1"
+# NDI in: the NDI runtime (libndi.dylib) is loaded at run time — its licence
+# forbids vendoring, and a hub without NDI must still build and run.
+libloading = "0.8"
 # Save writes [sync]/[[remap]] back into the config keeping its comments.
 toml_edit = "0.22"
 gilrs = "0.11.2"
