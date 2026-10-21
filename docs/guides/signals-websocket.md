@@ -85,6 +85,7 @@ epoch for all frames — deltas are meaningful, the absolute value is not).
 | `audio` | `{"t":"audio","ts":…,"blocks":[[min,max,rms],…]}` | ~30 Hz; per-RTP-packet level summaries — the console's waveform, **not** audio data |
 | `dests` | `{"t":"dests","dests":[…]}` | when a device registers or leaves |
 | `saved` | `{"t":"saved","ok":true,"path":"…"}` | reply to the console's save |
+| `dest_status` | `{"t":"dest_status","list":[{"name":"td","target":"td-laptop.local:9001","addr":"192.0.2.21:9001","lookup":"ok","state":"error","detail":"audio: nobody listening on port 5006","osc_rate":60,"rtp":{"port":5006,"rate":187.5,"error":"nobody listening on port 5006"}}]}` | ~1 Hz, and at once after `resolve`; one entry per static destination with a network address (below) |
 
 **Link peers.** Each `peer_list` entry is one Link peer:
 `{"node":"Qx7#kP2a","session":"…","in_session":true,"host":"192.0.2.21","hostname":"dj-laptop.local","local":false,"bpm":120,"playing":true,"age_ms":40}`
@@ -93,6 +94,20 @@ none), `hostname` that address's reverse-DNS name once known (absent until
 then, and for `local` peers, which run on the hub's machine), `playing` its
 start/stop state (absent if it never set one), `age_ms` how long ago it was
 last heard. Link does not say which app a peer is.
+
+**Destination status.** `dest_status` says, per static destination in
+`hub.toml` (not devices, not local `audio_out`s), whether the hub is reaching
+it. `target` is `host:port` as configured, `addr` what it resolved to (absent
+until it does), `lookup` ∈ `ok`/`pending`/`failed`/`no_host`, `osc_rate` OSC
+datagrams/s, `rtp` the audio stream for a destination with `rtp_port`.
+`state` is `ok` (sent, no error reported), `idle` (nothing to send yet),
+`pending` (looking the name up), `warn` (the name stopped resolving; the last
+address is still used) or `error`; `detail` says why in one line. OSC and RTP
+are UDP: the only errors there are the ones the network sends back ("nobody
+listening on port N" is the receiver's ICMP), so `ok` is never proof of
+receipt. A full-access client sends `{"t":"resolve"}` (the console's ↻) to
+look every name up now and forget earlier send errors; the hub also
+re-resolves every 5 s by itself.
 
 **Rates.** `watch "*"` is per-message: with devices publishing at 60 Hz plus
 MIDI, expect hundreds of frames a second — batch your reads per animation

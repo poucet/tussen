@@ -93,6 +93,7 @@ const SPEC = {   // t -> {required, optional}
   set_playing: { req: ['playing'], opt: [] },
   record_start: { req: [], opt: ['name'] },
   record_stop: { req: [], opt: [] },
+  resolve: { req: [], opt: [] },
 };
 function conforms(m) {
   const s = SPEC[m.t]; if (!s) return 'unknown t ' + m.t;
@@ -130,6 +131,7 @@ const sent = [
   L.msg.setPlaying(false),
   L.msg.setPlaying(1),
   L.msg.recordStart(), L.msg.recordStart('  sound check '), L.msg.recordStop(),
+  L.msg.resolve(),
 ];
 for (const m of sent) ok(conforms(m) === null, 'conforms: ' + JSON.stringify(m), conforms(m));
 ok(sent[1].signal_delay_ms === 70 && !('td_round_trip_ms' in sent[1]), 'set_sync carries only the moved field');
@@ -176,6 +178,7 @@ const HUB_SPEC = {
   addrs: ['list'],
   saved: ['ok'],
   link: ['ts', 'beat', 'bpm', 'quantum', 'playing', 'mode', 'peers', 'peer_list'],
+  dest_status: ['list'],
 };
 const run = runMock({}, 25, (hub, el) => {
   if (el === 15e3) hub.onMessage(L.msg.watch(['/ext/tablet/fader1', '/tussen/quest/controller/trigger']));
@@ -523,6 +526,43 @@ hub3.onMessage({ t: 'set_delay', dest: 'td', midi_delay_ms: 5 }); hub3.onMessage
 hub3.onMessage({ t: 'set_sync' }); hub3.onMessage({ t: 'set_sync', signal_delay_ms: 2.5 }); hub3.onMessage({ t: 'set_follow', dest: 'editor', follow: 'late' });
 ok(hub3.errors.length === 5, 'mock is strict (old set_delay, unknown field, empty/fractional set_sync, bad follow)', hub3.errors);
 ok(hub3.state.sync.signal_delay_ms === 0 && hub3.state.dests.find(d => d.name === 'editor').follow === 'td', 'rejected edits change nothing');
+
+// ---- destination status (the status column, the top-bar pill, the ↻ button) ----
+section('destination status');
+{
+  // A hub frame as protocol.rs/reach.rs make it (field names owned HERE).
+  const frame = { t: 'dest_status', list: [
+    { name: 'engine', target: '127.0.0.1:3928', addr: '127.0.0.1:3928', lookup: 'ok', state: 'ok', detail: 'sending; no error reported', osc_rate: 60.04 },
+    { name: 'td', target: 'td.local:9001', addr: '192.0.2.4:9001', lookup: 'ok', state: 'error', detail: 'audio: nobody listening on port 5006', osc_rate: 30, rtp: { port: 5006, rate: 187.5, error: 'nobody listening on port 5006' } },
+    { name: 'djay', target: 'andras-macbook-pro.local:9010', lookup: 'pending', state: 'pending', detail: 'looking up andras-macbook-pro.local…', osc_rate: 0 },
+    { name: 'flux', target: 'x:1', addr: '192.0.2.9:1', lookup: 'ok', state: 'idle', detail: 'nothing sent yet (no subscribed traffic)', osc_rate: 0 },
+  ] };
+  const S = L.createState();
+  ok(L.applyMessage(S, frame, 1000) === 'dest_status' && S.destStatus.size === 4, 'dest_status is applied');
+  const cell = (name, kind, at) => L.destStatusCell(S, { name: name, kind: kind || 'td' }, at === undefined ? 1500 : at);
+  const e = cell('engine', 'engine');
+  ok(e.cls === 'ok' && e.text === '● OSC 60/s' && /sends to: 127\.0\.0\.1:3928/.test(e.title), 'ok: green with its rate', e);
+  ok(/not received/.test(e.title), 'the tooltip says green is not a delivery receipt');
+  const t = cell('td');
+  ok(t.cls === 'bad' && t.text === '✕ audio: nobody listening on port 5006' && /audio \(RTP\) port 5006: nobody listening/.test(t.title), 'error: red, says why', t);
+  ok(cell('djay').cls === 'pending' && cell('djay').text === '… looking up andras-macbook-pro.local…', 'pending: looking up');
+  ok(/nothing \(not resolved\)/.test(cell('djay').title), 'unresolved: sends to nothing');
+  ok(cell('flux').cls === 'idle' && cell('flux').text === '○ idle', 'idle');
+  ok(cell('speakers', 'engine').text === 'local output', 'a static dest the hub does not report: a local audio output');
+  ok(cell('quest', 'device').text === '● announced', 'a device: announced');
+  ok(cell('engine', 'engine', 1000 + L.DEST_STATUS_STALE_MS + 1).text === '…', 'stale status shows as unknown, not green');
+  const sum = L.destSummary(S, 1500);
+  ok(sum.text === 'dests 1/4 sending · 1 ✕ · 1 …' && sum.cls === 'bad' && sum.bad.length === 1 && /^td: /.test(sum.bad[0]), 'summary pill', sum);
+  ok(L.destSummary(S, 1000 + L.DEST_STATUS_STALE_MS) === null && L.destSummary(L.createState(), 0) === null, 'no pill when stale or empty');
+  ok(L.normDestStatus({ name: 'x', state: 'weird' }).state === 'error', 'an unknown state is shown as an error, never as ok');
+  // The mock hub: td's RTP refuses until ↻, then it is green.
+  let kicked = false;
+  const r = runMock({}, 3, (hub, el) => { if (el >= 2e6 && !kicked) { kicked = true; hub.onMessage(L.msg.resolve()); } });
+  const st = r.msgs.filter(m => m.t === 'dest_status');
+  ok(st.length >= 3, 'mock sends dest_status every second', st.length);
+  ok(st[0].list.find(d => d.name === 'td').state === 'error' && st[st.length - 1].list.find(d => d.name === 'td').state === 'ok', 'mock: resolve turns td green');
+  ok(r.hub.errors.length === 0, 'mock saw no protocol errors (resolve)', r.hub.errors);
+}
 
 console.log((fail ? 'FAILED' : 'ok') + ': ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

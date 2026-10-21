@@ -25,7 +25,9 @@ Wire the hub and visuals laptops if you can. No IPs to note down: address
 laptops by their `.local` name (macOS: System Settings ▸ General ▸ Sharing ▸
 Local hostname). The hub re-resolves every hostname in `hub.toml` every 5 s,
 so a laptop that boots after the hub, or gets a new IP, is picked up without
-a restart.
+a restart. Startup never waits for a lookup. The console's dests table shows
+each destination's status — sending, idle, *doesn't resolve*, *nobody
+listening on port N* — and its ↻ looks every name up at once.
 
 | Port | Who listens | For |
 |---|---|---|
@@ -260,6 +262,11 @@ take holds): [record-and-replay.md](record-and-replay.md).
 
 - **Hub won't start, port 9000 busy:** another hub is running —
   `lsof -i :9000`.
+- **A destination gets nothing:** read its status in the console's dests
+  table (the top-bar *dests* pill says how many are failing). *Doesn't
+  resolve*: the `.local` name is wrong or that laptop is off the network —
+  use its IP. *Nobody listening on port N*: the receiver isn't running, or
+  listens on another port. *No host in config*: the entry has no `host =`.
 - **A device never registers from another machine:** the network drops its
   broadcast hello (client isolation, guest Wi-Fi). Use a network that
   doesn't, or give the device the hub's IP.

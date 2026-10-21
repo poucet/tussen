@@ -51,6 +51,39 @@ pub struct StaticDest {
     /// False while the host doesn't resolve: the destination gets
     /// nothing until it does (a laptop booted after the hub).
     pub resolved: bool,
+    /// Where its name lookup stands — for the console's status column.
+    pub lookup: Lookup,
+}
+
+/// A static destination's name lookup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lookup {
+    /// An IP literal, or a name that answered on its last lookup.
+    Ok,
+    /// A name not looked up yet (startup, or after the console's ↻).
+    Pending,
+    /// The last lookup failed. With `resolved` still true the
+    /// destination keeps its last good address.
+    Failed,
+    /// `host` is empty in config: nothing to look up, nothing is sent.
+    NoHost,
+}
+
+impl Lookup {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Lookup::Ok => "ok",
+            Lookup::Pending => "pending",
+            Lookup::Failed => "failed",
+            Lookup::NoHost => "no_host",
+        }
+    }
+}
+
+/// Whether a name is answered without the network (no mDNS, no DNS), so
+/// it can be resolved on the startup path.
+fn resolves_locally(host: &str) -> bool {
+    !is_hostname(host) || host.eq_ignore_ascii_case("localhost")
 }
 
 /// Resolve `host:port` to one IPv4 address if it has one (the send
@@ -108,22 +141,32 @@ pub struct Router {
 }
 
 impl Router {
-    /// Resolve the config's static destinations. A host that doesn't
-    /// resolve yet (a `.local` laptop not on the network) is a warning,
-    /// not an error: the destination stays silent until the hub's
-    /// periodic re-resolve ([`Router::set_static_addr`]) finds it.
+    /// The config's static destinations. IP literals and `localhost`
+    /// resolve here; every other name is left to the hub's background
+    /// resolver ([`Router::set_static_addr`]), because a `.local` laptop
+    /// that is off the network blocks a lookup for ~5 s, and startup must
+    /// not wait for it. Until a name answers, its destination gets nothing.
     pub fn from_config(config: &Config) -> anyhow::Result<Router> {
         let mut statics = Vec::new();
         for d in config.dests.iter().filter(|d| d.has_osc()) {
-            let resolved = resolve_host(&d.host, d.port);
-            if resolved.is_none() {
-                log::warn!("destination {}: {} doesn't resolve yet; retrying every few seconds", d.name, d.host);
-            }
+            let (resolved, lookup) = if d.host.trim().is_empty() {
+                log::warn!("destination {}: no host in config; it receives nothing", d.name);
+                (None, Lookup::NoHost)
+            } else if resolves_locally(&d.host) {
+                let r = resolve_host(&d.host, d.port);
+                if r.is_none() {
+                    log::warn!("destination {}: {} doesn't resolve", d.name, d.host);
+                }
+                (r, if r.is_some() { Lookup::Ok } else { Lookup::Failed })
+            } else {
+                (None, Lookup::Pending)
+            };
             let addr = resolved.unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], d.port)));
             statics.push(StaticDest {
                 host: d.host.clone(),
                 port: d.port,
                 resolved: resolved.is_some(),
+                lookup,
                 name: d.name.clone(),
                 addr,
                 sub: Subscription { subscribe: d.subscribe.clone(), exclude: d.exclude.clone() },
@@ -139,9 +182,17 @@ impl Router {
     pub fn static_hostnames(&self) -> Vec<(String, String, u16)> {
         self.statics
             .iter()
-            .filter(|s| is_hostname(&s.host))
+            .filter(|s| s.lookup != Lookup::NoHost && is_hostname(&s.host))
             .map(|s| (s.name.clone(), s.host.clone(), s.port))
             .collect()
+    }
+
+    /// The console's ↻: every name is looked up again, and shows as
+    /// pending until it answers. Addresses already known keep working.
+    pub fn mark_lookups_pending(&mut self) {
+        for s in self.statics.iter_mut().filter(|s| s.lookup != Lookup::NoHost && is_hostname(&s.host)) {
+            s.lookup = Lookup::Pending;
+        }
     }
 
     /// Apply a re-resolve result for one static destination. `None`
@@ -150,6 +201,7 @@ impl Router {
     /// new address when it changed.
     pub fn set_static_addr(&mut self, name: &str, addr: Option<SocketAddr>) -> Option<SocketAddr> {
         let s = self.statics.iter_mut().find(|s| s.name == name)?;
+        s.lookup = if addr.is_some() { Lookup::Ok } else { Lookup::Failed };
         let addr = addr?;
         if s.resolved && s.addr == addr {
             return None;

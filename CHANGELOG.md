@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+#### Who is reached: destination status in the console · 2026-10-21
+
+- **The console's dests table has a status column**, and the top bar a
+  *dests* pill: per destination from `hub.toml`, green with its OSC and
+  audio rates while sending, or what is wrong — *doesn't resolve*,
+  *nobody listening on port N* (the receiver's ICMP, seen now that each
+  static destination is sent to from a connected socket of its own, OSC
+  and RTP alike), *no host in config*. Green means sent with no error
+  reported; UDP can't confirm receipt. **↻** looks every name up at once
+  and forgets old errors, for a receiver that started after the hub.
+  New `dest_status` frame and `resolve` command
+  (docs/guides/signals-websocket.md).
+- **Startup no longer waits for name lookups.** Each `.local` name that
+  didn't answer held the hub ~5 s before the router started — three
+  destinations on a laptop that was off the network made it 15 s, with
+  MIDI and everything else queued behind it. Names now resolve in the
+  background: each distinct host once per round, all in parallel, each
+  answer applied as it comes.
+
 #### Hot-plug MIDI; the pad on the timeline · 2026-10-21
 
 - **MIDI controllers plugged in while the hub runs are found** within 2 s

@@ -70,6 +70,13 @@ pub struct AudioLink {
     /// Static destinations with an `rtp_port` (set once at hub start):
     /// the same audio, undelayed, each on its own RTP stream (SSRC).
     pub static_targets: Mutex<Vec<SocketAddr>>,
+    /// What sending to each static target has looked like (the sender
+    /// thread copies it here a few times a second): the console's
+    /// status column ([`crate::reach`]).
+    pub static_reach: Mutex<std::collections::HashMap<SocketAddr, crate::reach::Reach>>,
+    /// Bumped by the console's ↻: the sender forgets every static
+    /// stream's earlier send errors.
+    pub reach_epoch: AtomicU64,
     /// Total RTP packets sent (sender thread increments).
     pub packets: AtomicU64,
     /// Frames dropped because the capture ring was full.
@@ -291,7 +298,7 @@ fn sender_loop(cfg: &AudioConfig, link: &AudioLink, source: Source) {
             if let Some(rec) = link.rec.lock().ok().as_mut().and_then(|g| g.as_mut()) {
                 rec.push(&block, made);
             }
-            statics.send(link, &socket, &block, channels, packetizer.ssrc);
+            statics.send(link, &block, channels, packetizer.ssrc);
             link.packets.fetch_add(1, Ordering::Relaxed);
             if let Some(tap) = link.tap.get().filter(|t| t.active()) {
                 level_batch.push(&block, tap);
@@ -439,17 +446,26 @@ impl Readers {
 /// never depends on the devices' stream. Follows
 /// [`AudioLink::static_targets`], which the hub sets after the sender
 /// may already be running.
+///
+/// Each stream has a socket connected to its receiver ([`crate::reach::Conn`]),
+/// so "nobody listening" is seen and shown on the console.
 #[derive(Default)]
 struct StaticStreams {
-    streams: Vec<(SocketAddr, rtp::Packetizer)>,
+    streams: Vec<(SocketAddr, rtp::Packetizer, crate::reach::Conn)>,
     /// Reused for every packet.
     buf: Vec<u8>,
+    /// When the reach was last copied to [`AudioLink::static_reach`].
+    published: Option<Instant>,
+    epoch: u64,
 }
 
+/// How often the static streams' reach is copied for the hub.
+const REACH_EVERY: Duration = Duration::from_millis(250);
+
 impl StaticStreams {
-    fn send(&mut self, link: &AudioLink, socket: &UdpSocket, block: &[f32], channels: usize, device_ssrc: u32) {
+    fn send(&mut self, link: &AudioLink, block: &[f32], channels: usize, device_ssrc: u32) {
         let Ok(targets) = link.static_targets.lock() else { return };
-        if targets.len() != self.streams.len() || targets.iter().zip(&self.streams).any(|(t, (a, _))| t != a) {
+        if targets.len() != self.streams.len() || targets.iter().zip(&self.streams).any(|(t, (a, _, _))| t != a) {
             let mut used = vec![device_ssrc];
             self.streams = targets
                 .iter()
@@ -459,14 +475,32 @@ impl StaticStreams {
                         p.ssrc = p.ssrc.wrapping_add(0x9e37_79b9);
                     }
                     used.push(p.ssrc);
-                    (t, p)
+                    (t, p, crate::reach::Conn::new(t))
                 })
                 .collect();
         }
         drop(targets);
-        for (target, p) in &mut self.streams {
+        let epoch = link.reach_epoch.load(Ordering::Relaxed);
+        if epoch != self.epoch {
+            self.epoch = epoch;
+            for (_, _, c) in &mut self.streams {
+                c.forget_errors();
+            }
+        }
+        let now = Instant::now();
+        for (_, p, conn) in &mut self.streams {
             p.packet_into(block, channels, &mut self.buf);
-            let _ = socket.send_to(&self.buf, *target);
+            conn.send(&self.buf, now);
+        }
+        if self.published.is_none_or(|t| now.duration_since(t) >= REACH_EVERY) {
+            self.published = Some(now);
+            if let Ok(mut m) = link.static_reach.lock() {
+                m.clear();
+                for (t, _, c) in &mut self.streams {
+                    c.poll(now);
+                    m.insert(*t, c.reach.clone());
+                }
+            }
         }
     }
 }

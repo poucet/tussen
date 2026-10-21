@@ -305,3 +305,33 @@ fn a_device_following_td_hears_the_audio_a_round_trip_late() {
     assert!(min >= 98.0 && max <= 106.0, "min {min:.2} max {max:.2} ms");
     drop(hub);
 }
+
+#[test]
+fn a_static_rtp_port_nobody_listens_on_is_reported() {
+    // td's OSC port listens; its rtp_port does not.
+    let osc = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let dead = UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let config: Config = toml::from_str(&format!(
+        "[osc]\nlisten_port = 0\n[[dest]]\nname = \"td\"\nhost = \"127.0.0.1\"\nport = {}\nsubscribe = [\"/ext/\"]\nrtp_port = {dead}\n",
+        osc.local_addr().unwrap().port()
+    ))
+    .unwrap();
+    let link = Arc::new(AudioLink::default());
+    let (mut ring_tx, ring_rx) = rtrb::RingBuffer::<f32>::new(48000 * 2);
+    stream_ring(config.audio.clone(), Arc::clone(&link), ring_rx).unwrap();
+    let (_tx, rx) = crossbeam_channel::bounded(16);
+    let hub = hub::spawn_with_audio(config, rx, true, Some(Arc::clone(&link))).unwrap();
+    let target = std::net::SocketAddr::from(([127, 0, 0, 1], dead));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut seen = None;
+    while Instant::now() < deadline && seen.is_none() {
+        for _ in 0..2400 {
+            let _ = ring_tx.push(0.1);
+        }
+        std::thread::sleep(Duration::from_millis(25));
+        seen = link.static_reach.lock().unwrap().get(&target).and_then(|r| r.error_at(Instant::now()).map(str::to_owned));
+    }
+    link.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(seen.as_deref(), Some(format!("nobody listening on port {dead}").as_str()));
+    drop(hub);
+}

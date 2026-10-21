@@ -70,6 +70,10 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
 #linkstart{color:#fff;background:#6b4fbb;border-color:#8a6fd9}
 #peerdrop td.in{color:var(--ok)}#peerdrop td.v{text-align:right;font-variant-numeric:tabular-nums}
 #peerdrop .empty{color:var(--dim);padding:6px 0}
+td.st{max-width:340px;overflow:hidden;text-overflow:ellipsis}
+td.st.ok{color:var(--ok)}td.st.bad{color:var(--bad)}td.st.warn{color:var(--acc)}td.st.idle,td.st.pending,td.st.dim{color:var(--dim)}
+#resolve{padding:0 5px;margin-left:4px}
+#deststat{cursor:pointer}
 </style>
 </head>
 <body>
@@ -80,6 +84,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
   <span>window <input id="win" type="number" min="50" max="10000" step="10" value="2000"> ms</span>
   <span>gain <input id="gain" type="number" min="0.25" max="64" step="0.25" value="1"></span>
   <span id="recgrp" hidden><button id="rec" data-title="record a take: every signal, the audio and the Link timeline, from now until Stop (simply-tussen replay plays it back)">● Record</button> <span id="recinfo"></span></span>
+  <span id="deststat" class="pill" hidden role="button" tabindex="0" title="the destinations from hub.toml: who is being sent to — click for the table"></span>
   <span id="ndist" class="pill" hidden title="NDI in ([ndi] in hub.toml): what the hub receives and serves to pages on /ndi"></span>
   <span id="replayst" hidden title="the hub is replaying a take (simply-tussen replay): every signal and the audio come from it"></span>
   <span id="linkgrp" title="Ableton Link: the hub joins the session it hears, or waits with a beat of its own; the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="who is in the Link session — click for the list">no Link</span><div id="peerdrop" role="dialog" aria-label="Link peers"></div> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button> <button id="linkstart" hidden title="found a Link session now, at this tempo — for when nobody else will join">⊕ start session</button></span>
@@ -101,7 +106,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
       <div class="note">devices “in time with TD” wait this much longer, signals and audio, so they match TD's NDI picture.</div></div>
     <div class="sp">anchored at the beat <span class="note">the purple line holds still; drag the waveform (or slide the delay) until the kicks sit on it</span>
       <div id="awrap"><canvas id="aw"></canvas></div></div>
-    <table id="dests"><thead><tr><th>dest</th><th>kind</th><th>follow</th><th>signals ms</th><th>audio ms</th></tr></thead><tbody></tbody></table>
+    <table id="dests"><thead><tr><th>dest</th><th>kind</th><th>follow</th><th>signals ms</th><th>audio ms</th><th>status<button id="resolve" title="look every destination's host up again now and forget old send errors — for a laptop or receiver that started after the hub (the hub also retries by itself every 5 s)">↻</button></th></tr></thead><tbody></tbody></table>
     <div id="align" class="note" style="margin-top:6px"></div>
     <p class="note">Click a MIDI marker to select it; the cursor readout shows cursor − marker. <kbd>Space</kbd> pause · wheel zoom · drag pans (paused) · <kbd>←</kbd><kbd>→</kbd> signal delay ±1 (<kbd>⇧</kbd> ±10).</p>
   </div>
@@ -270,6 +275,46 @@ function normDest(d) {
   if (o.kind === 'device') o.follow = d.follow === 'music' ? 'music' : 'td';
   return o;
 }
+// --- destination status (the dests table's status column, the top-bar pill) ---
+const DEST_STATES = ['ok', 'idle', 'pending', 'warn', 'error'];
+const DEST_STATUS_STALE_MS = 3500;   // the hub sends it every second
+function normDestStatus(d) {
+  const o = { name: String(d.name), target: String(d.target || ''), addr: d.addr ? String(d.addr) : null, lookup: String(d.lookup || ''),
+    state: DEST_STATES.includes(d.state) ? d.state : 'error', detail: String(d.detail || ''), oscRate: Number(d.osc_rate) || 0, rtp: null };
+  if (d.rtp && typeof d.rtp === 'object') o.rtp = { port: Number(d.rtp.port) || 0, rate: Number(d.rtp.rate) || 0, error: d.rtp.error ? String(d.rtp.error) : null };
+  return o;
+}
+function fmtRate(r) { return r >= 10 ? String(Math.round(r)) : String(Math.round(r * 10) / 10); }
+// One dests-table status cell: {cls, text, title}. `d` is the dest (name,
+// kind) from hello; the hub reports static network destinations only, so a
+// device is "announced" (it is listed because its hello arrived) and a
+// static one missing from a fresh list is a local audio output.
+function destStatusCell(s, d, localMs) {
+  if (d.kind === 'device') return { cls: 'ok', text: '● announced', title: 'a device: listed while its /tussen/hub/hello keeps arriving' };
+  const fresh = localMs - s.destStatusAtMs < DEST_STATUS_STALE_MS, st = s.destStatus.get(d.name);
+  if (!fresh) return { cls: 'dim', text: '…', title: 'no status from the hub yet' };
+  if (!st) return { cls: 'dim', text: 'local output', title: 'an audio_out on this machine: no network' };
+  const rates = [st.oscRate > 0 ? 'OSC ' + fmtRate(st.oscRate) + '/s' : '', st.rtp && st.rtp.rate > 0 ? 'audio ' + fmtRate(st.rtp.rate) + '/s' : ''].filter(Boolean).join(' · ');
+  const text = st.state === 'ok' ? '● ' + (rates || 'sending')
+    : st.state === 'idle' ? '○ idle'
+    : st.state === 'pending' ? '… ' + st.detail
+    : (st.state === 'warn' ? '▲ ' : '✕ ') + st.detail;
+  const title = [
+    'config: ' + st.target, 'sends to: ' + (st.addr || 'nothing (not resolved)'), st.detail,
+    st.rtp ? 'audio (RTP) port ' + st.rtp.port + ': ' + (st.rtp.error || fmtRate(st.rtp.rate) + ' packets/s') : '',
+    'UDP has no connection: ● means sent with no error reported, not received. A firewall that drops ICMP hides "nobody listening".',
+  ].filter(Boolean).join('\n');
+  return { cls: { ok: 'ok', idle: 'idle', pending: 'pending', warn: 'warn', error: 'bad' }[st.state], text: text, title: title };
+}
+// The top-bar pill: counts per state over the static network destinations.
+function destSummary(s, localMs) {
+  if (localMs - s.destStatusAtMs >= DEST_STATUS_STALE_MS || !s.destStatus.size) return null;
+  const n = { ok: 0, idle: 0, pending: 0, warn: 0, error: 0 }, bad = [];
+  for (const st of s.destStatus.values()) { n[st.state]++; if (st.state === 'error' || st.state === 'warn') bad.push(st.name + ': ' + st.detail); }
+  const parts = [n.ok + '/' + s.destStatus.size + ' sending'];
+  if (n.error) parts.push(n.error + ' ✕'); if (n.warn) parts.push(n.warn + ' ▲'); if (n.pending) parts.push(n.pending + ' …');
+  return { text: 'dests ' + parts.join(' · '), cls: n.error ? 'bad' : n.warn || n.pending ? '' : 'ok', bad: bad };
+}
 function normSync(y) {
   y = y || {};
   return { signal_delay_ms: Number(y.signal_delay_ms) || 0, td_round_trip_ms: Number(y.td_round_trip_ms) || 0 };
@@ -286,6 +331,8 @@ function createState() {
     replay: null,                      // the latest `link` message's replay {take, bar, bars, loop}, if replaying
     record: null,                      // hello's record {on, take, elapsedMs, atMs, error}; null: this hub cannot record
     oscEndpoint: null,                 // hello's osc {port, ips, hostname}: where senders aim
+    destStatus: new Map(),             // name -> the latest dest_status entry (normDestStatus)
+    destStatusAtMs: -Infinity,         // local ms the latest dest_status arrived
     addrSeen: new Map(),               // addr -> latest addrs entry; accumulates, never deletes
     history: { buf: [], total: 0 },    // live messages, ts ascending, ring of HISTORY_CAP
   };
@@ -412,6 +459,10 @@ function applyMessage(s, m, localMs) {
     case 'dests':
       s.dests = (m.dests || []).map(normDest);
       return 'dests';
+    case 'dest_status':
+      s.destStatus = new Map((Array.isArray(m.list) ? m.list : []).filter(d => d && d.name).map(d => [String(d.name), normDestStatus(d)]));
+      s.destStatusAtMs = localMs;
+      return 'dest_status';
     case 'audio': {
       const bd = blockDurUs(s.sampleRate), b = m.blocks || [];
       for (let i = 0; i < b.length; i++) s.audio.push(m.ts + i * bd, b[i][0], b[i][1], b[i][2]);
@@ -508,6 +559,7 @@ const msg = {
   },
   remapDelete: (id) => ({ t: 'remap_delete', id: id }),
   save: () => ({ t: 'save' }),
+  resolve: () => ({ t: 'resolve' }),
   setTempo: (bpm) => ({ t: 'set_tempo', bpm: clampTempo(bpm) }),
   setPlaying: (p) => ({ t: 'set_playing', playing: !!p }),
   linkStart: () => ({ t: 'link_start' }),
@@ -665,6 +717,7 @@ function createMockHub(opts) {
     remaps: [{ id: 1, dest: 'td', from: '/tussen/*/head/n/yaw', to: '/td/yaw', range: [0, 1], keep: false }],
     watch: [], saves: 0,
     record: { on: false, take: '', since: 0 },
+    tdRtpListening: false,   // td's RTP port refuses until ↻ (a receiver started after the hub)
   };
   const seen = new Map();     // addr -> {last_ts, hits: [ts...], v, count}
   const errors = [];          // protocol violations from the page
@@ -677,6 +730,15 @@ function createMockHub(opts) {
     if (o.replay) r.off = 'recording is off during replay';
     return r;
   };
+  let lastStatus = -Infinity;
+  // Like the hub: static network destinations only (the devices are in dests).
+  const statusMsg = () => ({ t: 'dest_status', list: [
+    { name: 'engine', target: '127.0.0.1:3928', addr: '127.0.0.1:3928', lookup: 'ok', state: 'ok', detail: 'sending; no error reported', osc_rate: 61.5 },
+    st.tdRtpListening
+      ? { name: 'td', target: 'td-laptop.local:9001', addr: '192.0.2.21:9001', lookup: 'ok', state: 'ok', detail: 'sending; no error reported', osc_rate: 92, rtp: { port: 5006, rate: 187.5 } }
+      : { name: 'td', target: 'td-laptop.local:9001', addr: '192.0.2.21:9001', lookup: 'ok', state: 'error', detail: 'audio: nobody listening on port 5006', osc_rate: 92, rtp: { port: 5006, rate: 187.5, error: 'nobody listening on port 5006' } },
+    { name: 'monitor', target: 'dj-laptop.local:9099', lookup: 'failed', state: 'error', detail: "dj-laptop.local doesn't resolve", osc_rate: 0 },
+  ] });
   const helloMsg = () => ({ t: 'hello', sync: Object.assign({}, st.sync), dests: allDests(), remaps: st.remaps.map(r => Object.assign({}, r)), sample_rate: sr, osc: Object.assign({}, MOCK_OSC, { ips: MOCK_OSC.ips.slice() }), record: recordMsg() });
   const allDests = () => st.dests.concat(questPresent ? [{ name: 'quest', kind: 'device', follow: st.questFollow }] : []).map(d => Object.assign({}, d));
   // MIDI/clock signals are hub-made (out, like the real hub's generated
@@ -706,6 +768,7 @@ function createMockHub(opts) {
     const a = lastUs, b = nowUs;
     if (o.joinMs !== null && link.mode === 'waiting' && b - t0 >= o.joinMs * 1000) relink(b, () => { link.peers = 3; link.mode = 'joined'; link.bpm = o.joinBpm; });
     if (b - link.lastSend >= 250e3) { link.lastSend = b; out.push(linkMsg(b)); }
+    if (b - lastStatus >= 1e6) { lastStatus = b; out.push(statusMsg()); }
     // presence of a second device, toggling every 20 s
     const q = Math.floor((b - t0) / 20e6) % 2 === 1;
     if (q !== questPresent) { questPresent = q; out.push({ t: 'dests', dests: allDests() }); }
@@ -752,7 +815,7 @@ function createMockHub(opts) {
     lastUs = b;
     return out.splice(0, out.length);
   }
-  const ALLOWED = { watch: ['addrs'], set_sync: ['signal_delay_ms', 'td_round_trip_ms'], set_follow: ['dest', 'follow'], remap_upsert: ['id', 'dest', 'from', 'to', 'range', 'keep'], remap_delete: ['id'], save: [], set_tempo: ['bpm'], set_playing: ['playing'], link_start: [], record_start: ['name'], record_stop: [] };
+  const ALLOWED = { watch: ['addrs'], set_sync: ['signal_delay_ms', 'td_round_trip_ms'], set_follow: ['dest', 'follow'], remap_upsert: ['id', 'dest', 'from', 'to', 'range', 'keep'], remap_delete: ['id'], save: [], set_tempo: ['bpm'], set_playing: ['playing'], link_start: [], record_start: ['name'], record_stop: [], resolve: [] };
   function onMessage(m) {
     if (!m || !(m.t in ALLOWED)) { errors.push('unknown message ' + JSON.stringify(m)); return; }
     for (const k of Object.keys(m)) if (k !== 't' && !ALLOWED[m.t].includes(k)) errors.push(m.t + ': unknown field ' + k);
@@ -797,6 +860,8 @@ function createMockHub(opts) {
         if (!st.record.on && !o.replay) st.record = { on: true, since: lastUs, take: '2026-10-20T21-14-03' + (m.name ? '-' + m.name.replace(/[^A-Za-z0-9_-]/g, '-') : '') };
         out.push(helloMsg()); return;
       case 'record_stop': st.record.on = false; out.push(helloMsg()); return;
+      // like the hub: a fresh status at once
+      case 'resolve': st.tdRtpListening = true; out.push(statusMsg()); return;
     }
   }
   return { tick: tick, onMessage: onMessage, errors: errors, state: st, opts: o, kickTimeUs: (k) => t0 + kickOffsetUs + k * beatUs };
@@ -810,6 +875,7 @@ const api = {
   timeToX, xToTime, zoomView, gridStepMs, blockDurUs,
   AudioRing, midiKind, createState, resetBuffers, applyMessage, sortedAddrs, isHot, HEAT_MS, matchPattern,
   HISTORY_CAP, histPush, historyRows, seenRows, endpointText, endpointLines,
+  DEST_STATES, DEST_STATUS_STALE_MS, normDestStatus, destStatusCell, destSummary,
   msg, isTempId, parseRuleForm, applyLocalEdit, detectOnsets, alignStats, beatAnchor, createMockHub,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -855,6 +921,7 @@ function onHubText(text) {
   }
   if (t === 'hello') { if (S.helloCount === 1 || connJustOpened) { connJustOpened = false; sendNow(watchMsg()); } rebuildDests(); renderRules(); renderUnsaved(); renderEndpoint(); renderRecord(); }
   else if (t === 'dests') rebuildDests();
+  else if (t === 'dest_status') renderDestStatus();
   else if (t === 'addrs') renderAddrs();
   else if (t === 'saved') { renderSaved(); renderUnsaved(); }
   else if (t === 'link') renderLink();
@@ -1010,7 +1077,7 @@ function rebuildDests() {
         fc.appendChild(follow);
       } else if (NEVER[d.kind]) fc.innerHTML = '<span class="note">' + NEVER[d.kind] + '</span>';
       else if (d.kind === 'td') fc.innerHTML = '<span class="note">sync point 1</span>';
-      r = { tr: tr, kind: d.kind, follow: follow, sig: td(), aud: td() };
+      r = { tr: tr, kind: d.kind, follow: follow, sig: td(), aud: td(), st: td() };
       rows.set(d.name, r);
     }
     tb.appendChild(r.tr);   // keeps hub order
@@ -1018,6 +1085,7 @@ function rebuildDests() {
   }
   sigCtl.update(S.sync.signal_delay_ms); rtCtl.update(S.sync.td_round_trip_ms);
   renderDestDelays();
+  renderDestStatus();
   const rd = $('#rdest'), keep = rd.value; rd.innerHTML = S.dests.map(d => '<option>' + esc(d.name) + '</option>').join(''); if (keep && names.has(keep)) rd.value = keep;
 }
 // the effective delay per destination, read-only: signals ms / audio ms
@@ -1027,6 +1095,26 @@ function renderDestDelays() {
     r.sig.textContent = L.signalDelayMs(d, S.sync); r.aud.textContent = L.audioDelayMs(d, S.sync);
   }
 }
+
+// whether each destination is being reached: the status column + the top-bar pill
+function renderDestStatus() {
+  const now = performance.now();
+  for (const d of S.dests) {
+    const r = rows.get(d.name); if (!r) continue;
+    const c = L.destStatusCell(S, d, now);
+    r.st.className = 'st ' + c.cls; r.st.textContent = c.text; r.st.title = c.title;
+  }
+  const sum = L.destSummary(S, now), p = $('#deststat');
+  p.hidden = !sum;
+  if (!sum) return;
+  p.textContent = sum.text; p.className = 'pill ' + sum.cls;
+  p.title = (sum.bad.length ? sum.bad.join('\n') + '\n\n' : '') + 'the destinations from hub.toml: who is being sent to — click for the table';
+}
+setInterval(renderDestStatus, 1000);   // goes stale (…) when the hub stops sending it
+$('#resolve').onclick = () => sendNow(L.msg.resolve());
+function showDests() { $('#tab-sync').click(); $('#dests').scrollIntoView({ block: 'nearest' }); }
+$('#deststat').addEventListener('click', showDests);
+$('#deststat').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); showDests(); } });
 
 // ---- addresses / rules -------------------------------------------------------
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }

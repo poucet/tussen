@@ -96,6 +96,8 @@ pub enum Event {
     Addrs(Vec<AddrInfo>),
     /// The Link session, for the beat grid (~4 Hz and on change).
     Link(crate::link::LinkStatus),
+    /// Every static destination's status (~1 Hz and on change).
+    DestStatus(Vec<crate::reach::DestStatus>),
 }
 
 /// The publish side of the console, shared by the router and the audio
@@ -137,6 +139,9 @@ pub enum RouterCmd {
     Sync(Arc<SyncState>),
     /// The union of every page's OSC watch list.
     Watch(Arc<HashSet<String>>),
+    /// The ↻ button: look every destination's host up now and forget
+    /// old send errors.
+    Resolve,
 }
 
 /// What the router loop holds: commands in, the tap out.
@@ -371,6 +376,7 @@ pub fn start_with_record(
             sample_rate: opts.sample_rate,
             link: link_tx,
             record,
+            dest_status: None,
         };
         let stop = Arc::clone(&stop);
         move || hub.run(&ev_rx, &ctl_rx, &inbox_rx, &stop)
@@ -398,6 +404,8 @@ struct ConsoleHub {
     sample_rate: u32,
     link: Sender<crate::link::LinkCmd>,
     record: Option<Arc<crate::record::Control>>,
+    /// The last `dest_status` frame, for a page that joins between two.
+    dest_status: Option<Arc<str>>,
 }
 
 impl ConsoleHub {
@@ -485,6 +493,11 @@ impl ConsoleHub {
             Event::Midi { ts, addr, v } => self.broadcast(protocol::midi(ts, &addr, v).into()),
             Event::Addrs(list) => self.broadcast(protocol::addrs(&list).into()),
             Event::Link(status) => self.broadcast(protocol::link(&status).into()),
+            Event::DestStatus(list) => {
+                let frame: Arc<str> = protocol::dest_status(&list).into();
+                self.dest_status = Some(Arc::clone(&frame));
+                self.broadcast(frame);
+            }
             Event::Osc { ts, addr, v, src } => {
                 let mut frame: Option<Arc<str>> = None;
                 // "*" watches everything (the history tab).
@@ -501,6 +514,9 @@ impl ConsoleHub {
             ClientMsg::Join(id, tx, readonly) => {
                 let c = Client { tx, watch: HashSet::new(), readonly };
                 self.send_to(&c, &self.hello());
+                if let Some(f) = &self.dest_status {
+                    self.send_to(&c, f);
+                }
                 self.clients.insert(id, c);
                 self.tap.clients.store(self.clients.len(), Ordering::Relaxed);
             }
@@ -582,6 +598,10 @@ impl ConsoleHub {
                     r.stop();
                 }
                 self.broadcast(self.hello());
+            }
+            // The router answers with a fresh `dest_status` at once.
+            Request::Resolve => {
+                let _ = self.router.send(RouterCmd::Resolve);
             }
             Request::Save => {
                 let reply = match &mut self.config {

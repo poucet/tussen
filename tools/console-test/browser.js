@@ -50,7 +50,7 @@ let ch = null;
 
   ok(/MOCK/.test(await ev("document.querySelector('#conn').textContent")), 'status pill says MOCK');
   const row = (name) => "document.querySelector('#dests tbody tr[data-dest=\"" + name + "\"]')";
-  const cells = async (name) => ev("[...(" + row(name) + ").children].slice(3).map(c => c.textContent).join('/')");
+  const cells = async (name) => ev("[...(" + row(name) + ").children].slice(3, 5).map(c => c.textContent).join('/')");
   ok(await ev("document.querySelectorAll('#dests tbody tr').length") >= 4, 'destination rows built from hello');
   ok(/never delayed/.test(await ev(row('engine') + ".textContent")) && /never delayed/.test(await ev(row('monitor') + ".textContent")), 'engine and monitor rows explain why');
   ok(await ev("[...document.querySelectorAll('#dests tbody tr')].every(r => !!r.querySelector('select.follow') === /device/.test(r.children[1].textContent))"), 'a follow switch on device rows only');
@@ -65,6 +65,30 @@ let ch = null;
   }
   ok(await ev("document.querySelector('#tl').clientHeight") === 16 + 200 + 34 + 2 * 40, 'canvas has two OSC lanes for ?watch=');
   ok(/Link 2 peers\b/.test(await ev("document.querySelector('#linkst').textContent")), 'Link group shows peers');
+  // ---- destination status: the column, the top-bar pill, ↻ ------------------
+  await sleep(1300);
+  const stOf = (name) => ev("(() => { const c = document.querySelector('#dests tr[data-dest=\"" + name + "\"] td.st'); return c ? { cls: c.className, text: c.textContent } : null; })()");
+  const td0 = await stOf('td');
+  ok(td0 && /\bbad\b/.test(td0.cls) && td0.text === '✕ audio: nobody listening on port 5006', 'status: td is red and says why', td0);
+  ok((await stOf('engine')).text === '● OSC 62/s', 'status: engine green with its rate', await stOf('engine'));
+  ok(/doesn't resolve/.test((await stOf('monitor')).text), 'status: an unresolved name says so');
+  ok((await stOf('editor')).text === '● announced', 'status: a device is announced');
+  const pill = () => ev("(() => { const p = document.querySelector('#deststat'); return { hidden: p.hidden, text: p.textContent, cls: p.className }; })()");
+  ok(!(await pill()).hidden && (await pill()).text === 'dests 1/3 sending · 2 ✕' && /\bbad\b/.test((await pill()).cls), 'top bar: the dests pill', await pill());
+  const clipDests = async (file) => {
+    fs.mkdirSync(shotDir, { recursive: true });
+    const r = await ev("(() => { const b = document.querySelector('#dests').getBoundingClientRect(); return { y: b.top + scrollY, h: b.height }; })()");
+    const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1600, height: Math.ceil(r.y + r.h + 8), scale: 1 } });
+    fs.writeFileSync(path.join(shotDir, file), Buffer.from(shot.result.data, 'base64'));
+  };
+  await clipDests('console-dest-status.png');
+  await ev("document.querySelector('#resolve').click()");
+  await sleep(300);
+  ok(/\bok\b/.test((await stOf('td')).cls) && (await stOf('td')).text === '● OSC 92/s · audio 188/s', '↻: td goes green at once', await stOf('td'));
+  await clipDests('console-dest-status-after-resolve.png');
+  await ev("document.querySelector('#tab-osc').click(); document.querySelector('#deststat').click()");
+  ok(await ev("document.querySelector('#tab-sync').classList.contains('on')"), 'clicking the pill shows the dests table');
+
   // ---- the peer dropdown: click the count; outside click and Escape close it --
   const dropOpen = () => ev("document.querySelector('#peerdrop').classList.contains('open') && document.querySelector('#peerdrop').offsetParent !== null");
   const peerRowsText = () => ev("[...document.querySelectorAll('#peerdrop tbody tr')].map(r => [...r.children].map(c => c.textContent).join('|'))");
@@ -296,7 +320,7 @@ let ch = null;
 
   ok(errors.length === 0, 'no uncaught errors / console errors', errors);
 
-  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-waiting.png, console-link-started.png, console-recording.png, console-replaying.png');
+  console.log('screenshots: ' + path.join(shotDir, 'console-mock-sync70-rt30-400ms.png') + ', console-mock-link-grid-4s.png, console-osc-tab-history-addresses.png, console-link-peers-open.png, console-link-waiting.png, console-link-started.png, console-recording.png, console-replaying.png, console-dest-status.png, console-dest-status-after-resolve.png');
   console.log((fail ? 'FAILED' : 'ok') + ': ' + pass + ' passed, ' + fail + ' failed');
   clearTimeout(killer); ws.close(); ch.kill('SIGKILL');
   process.exit(fail ? 1 : 0);

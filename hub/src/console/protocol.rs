@@ -100,6 +100,12 @@ pub fn link(s: &crate::link::LinkStatus) -> String {
     v.to_string()
 }
 
+/// Every static destination's status: whether it resolves and whether
+/// sending to it reports an error ([`crate::reach`]).
+pub fn dest_status(list: &[crate::reach::DestStatus]) -> String {
+    json!({ "t": "dest_status", "list": list }).to_string()
+}
+
 pub fn saved(result: Result<&str, &str>) -> String {
     match result {
         Ok(path) => json!({ "t": "saved", "ok": true, "path": path }),
@@ -127,6 +133,8 @@ pub enum Request {
     /// `record_start` (optional `name`) / `record_stop`: the Record button.
     RecordStart(Option<String>),
     RecordStop,
+    /// `resolve`: the destination status's ↻ — look every host up now.
+    Resolve,
 }
 
 fn ms(v: &Value, key: &str) -> Result<Option<u32>, String> {
@@ -208,6 +216,7 @@ pub fn parse_request(text: &str) -> Result<Request, String> {
             v.get("name").and_then(Value::as_str).map(str::to_owned).filter(|n| !n.trim().is_empty()),
         )),
         "record_stop" => Ok(Request::RecordStop),
+        "resolve" => Ok(Request::Resolve),
         "set_tempo" => match v.get("bpm").and_then(Value::as_f64) {
             Some(bpm) if bpm.is_finite() => Ok(Request::Link(crate::link::LinkCmd::Tempo(bpm))),
             _ => Err("set_tempo needs a number bpm".into()),
@@ -373,6 +382,7 @@ mod tests {
         assert_eq!(parse_request(r#"{"t":"record_start","name":"take 1"}"#).unwrap(), Request::RecordStart(Some("take 1".into())));
         assert_eq!(parse_request(r#"{"t":"record_start"}"#).unwrap(), Request::RecordStart(None));
         assert_eq!(parse_request(r#"{"t":"record_stop"}"#).unwrap(), Request::RecordStop);
+        assert_eq!(parse_request(r#"{"t":"resolve"}"#).unwrap(), Request::Resolve);
         assert!(parse_request(r#"{"t":"nope"}"#).is_err());
         assert!(parse_request("not json").is_err());
         assert!(parse_request(r#"{"t":"set_sync","signal_delay_ms":"x"}"#).is_err());

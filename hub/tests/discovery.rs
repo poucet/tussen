@@ -229,3 +229,52 @@ fn live_router_on_9000() {
     std::thread::sleep(Duration::from_secs(secs));
     drop(hub);
 }
+
+#[test]
+fn a_dead_host_holds_up_nobody_and_a_kick_re_resolves_at_once() {
+    // "dead.local" takes 800 ms to fail (an mDNS miss, shortened); the two
+    // destinations on "td.local" share one lookup and answer at once.
+    let calls = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (kick, kicked) = crossbeam_channel::bounded::<()>(1);
+    let started = std::time::Instant::now();
+    let rx = hub::spawn_resolver_with_kick(
+        vec![
+            ("djay".into(), "dead.local".into(), 9010),
+            ("td".into(), "td.local".into(), 9001),
+            ("td-rtp".into(), "td.local".into(), 9002),
+        ],
+        Duration::from_secs(60),
+        Arc::clone(&stop),
+        {
+            let calls = Arc::clone(&calls);
+            move |host, port| {
+                calls.lock().unwrap().push(host.to_owned());
+                if host == "dead.local" {
+                    std::thread::sleep(Duration::from_millis(800));
+                    return None;
+                }
+                Some(SocketAddr::from(([198, 51, 100, 7], port)))
+            }
+        },
+        kicked,
+    );
+    // The live host answers first, well before the dead one gives up.
+    let first = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(started.elapsed() < Duration::from_millis(400), "{:?}", started.elapsed());
+    assert_eq!(
+        first,
+        vec![
+            ("td".to_owned(), Some("198.51.100.7:9001".parse().unwrap())),
+            ("td-rtp".to_owned(), Some("198.51.100.7:9002".parse().unwrap())),
+        ]
+    );
+    assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), vec![("djay".to_owned(), None)]);
+    // One lookup per distinct host.
+    assert_eq!(calls.lock().unwrap().len(), 2);
+    // The period is a minute away; a kick runs a round now.
+    kick.send(()).unwrap();
+    let again = rx.recv_timeout(Duration::from_secs(1)).expect("the kick ran no round");
+    assert_eq!(again[0].0, "td");
+    stop.store(true, Ordering::Relaxed);
+}

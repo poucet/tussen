@@ -658,3 +658,101 @@ fn ndi_frames_reach_a_local_page_newest_first() {
     s.read_to_string(&mut body).unwrap();
     assert!(body.contains("Access-Control-Allow-Origin: *") && body.contains("TussenNDI"), "{body}");
 }
+
+#[test]
+fn the_status_column_shows_who_is_reached_and_resolve_rechecks() {
+    // td listens; "gone" is a loopback port nobody listens on (the hub's
+    // own socket for it gets ICMP port unreachable back); "laptop" has a
+    // name that never resolves; "blank" has no host at all.
+    let td = Recorder::new();
+    let gone = UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let config: Config = toml::from_str(&format!(
+        r#"
+[osc]
+listen_port = 0
+[[dest]]
+name = "td"
+host = "127.0.0.1"
+port = {}
+subscribe = ["/ext/"]
+[[dest]]
+name = "gone"
+host = "127.0.0.1"
+port = {gone}
+subscribe = ["/ext/"]
+[[dest]]
+name = "laptop"
+host = "no-such-host.invalid"
+port = 9001
+subscribe = ["/ext/"]
+[[dest]]
+name = "blank"
+port = 9002
+subscribe = ["/ext/"]
+"#,
+        td.port
+    ))
+    .unwrap();
+    let started = Instant::now();
+    let (console, router_side) = console::start(ConsoleOptions {
+        port: 0,
+        osc_port: 9000,
+        config: None,
+        statics: config.dests.iter().map(|d| (d.name.clone(), d.kind())).collect(),
+        sample_rate: 48000,
+        state: SyncState::new(config.sync.clone(), config.remap.clone()),
+    })
+    .unwrap();
+    let (_gen_tx, gen_rx) = crossbeam_channel::bounded::<Message>(64);
+    let hub = hub::spawn_with(config, gen_rx, true, Extras { audio: None, console: Some(router_side) }).unwrap();
+    // An unresolvable name no longer holds up startup.
+    assert!(started.elapsed() < Duration::from_secs(1), "startup took {:?}", started.elapsed());
+    let hub_addr = SocketAddr::from(([127, 0, 0, 1], hub.addr().port()));
+    let mut ws = connect(console.addr);
+    expect(&mut ws, "hello", Duration::from_secs(2), |_| true);
+
+    // Traffic for every destination, for a while.
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let feeder = {
+        let stop = std::sync::Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let m = Message::new("/ext/x").arg(Value::Float32(0.5)).encode().unwrap();
+                sender.send_to(&m, hub_addr).unwrap();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })
+    };
+    let of = |v: &Json, name: &str| v["list"].as_array().unwrap().iter().find(|d| d["name"] == name).cloned().unwrap();
+    let s = expect(&mut ws, "dest_status", Duration::from_secs(5), |v| {
+        v["list"].as_array().is_some_and(|l| {
+            l.iter().any(|d| d["name"] == "td" && d["state"] == "ok")
+                && l.iter().any(|d| d["name"] == "gone" && d["state"] == "error")
+                && l.iter().any(|d| d["name"] == "laptop" && d["state"] == "error")
+        })
+    });
+    let td_s = of(&s, "td");
+    assert_eq!(td_s["addr"], format!("127.0.0.1:{}", td.port));
+    assert!(td_s["osc_rate"].as_f64().unwrap() > 10.0, "{td_s}");
+    assert_eq!(of(&s, "gone")["detail"], format!("OSC: nobody listening on port {gone}"));
+    assert_eq!(of(&s, "laptop")["detail"], "no-such-host.invalid doesn't resolve");
+    assert!(of(&s, "laptop").get("addr").is_none());
+    assert_eq!((of(&s, "blank")["state"].as_str(), of(&s, "blank")["lookup"].as_str()), (Some("error"), Some("no_host")));
+    assert!(!td.drain(Duration::from_millis(100)).is_empty(), "td got nothing");
+
+    // Something starts listening on the dead port; ↻ forgets the old
+    // error at once instead of after the hold.
+    let late = UdpSocket::bind(("127.0.0.1", gone)).unwrap();
+    send(&mut ws, json!({"t": "resolve"}));
+    let s = expect(&mut ws, "dest_status", Duration::from_secs(3), |v| {
+        v["list"].as_array().is_some_and(|l| l.iter().any(|d| d["name"] == "gone" && d["state"] == "ok"))
+    });
+    assert_eq!(of(&s, "gone")["detail"], "sending; no error reported");
+    late.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+    assert!(late.recv_from(&mut [0u8; 2048]).is_ok(), "the late listener gets traffic");
+
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    feeder.join().unwrap();
+    drop(hub);
+}

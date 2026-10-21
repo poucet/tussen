@@ -28,7 +28,8 @@ use crate::bundles;
 use crate::config::Config;
 use crate::console::{self, Event, RouterCmd, RouterConsole, SeenTable};
 use crate::generators::audio::{AudioLink, RtpTarget};
-use crate::router::{classify, resolve_host, HelloOutcome, HubMessage, Router};
+use crate::reach::{self, Conn};
+use crate::router::{classify, resolve_host, HelloOutcome, HubMessage, Lookup, Router};
 use crate::sync::{self, Class, DelayLine, SyncState};
 use crate::record::{self, Slot};
 use crate::take::Recorder;
@@ -150,7 +151,10 @@ pub fn spawn_with_takes(
     // `.local` laptops change IP (DHCP) and may boot after the hub:
     // re-resolve every static hostname off-thread (an mDNS miss can take
     // seconds) and let the loop apply the answers.
-    let resolved = spawn_resolver(router.static_hostnames(), RESOLVE_PERIOD, Arc::clone(&stop), resolve_host);
+    // The console's ↻ kicks a round at once.
+    let (kick, kicked) = crossbeam_channel::bounded::<()>(1);
+    let resolved =
+        spawn_resolver_with_kick(router.static_hostnames(), RESOLVE_PERIOD, Arc::clone(&stop), resolve_host, kicked);
 
     // The listener hands packets over a std channel; forward them into a
     // crossbeam one so the loop can wait on the network, the generators,
@@ -182,6 +186,7 @@ pub fn spawn_with_takes(
             let mut l = Loop::new(&config, router, extras, takes);
             l.hub_port = addr.port();
             l.resolved = resolved;
+            l.kick = Some(kick);
             // The audio_out destinations are there from the start.
             sync_rtp_targets(l.audio.as_deref(), &l.router, &l.sync);
             l.run(&out, net_rx, generated, &malformed, &stop, quiet)
@@ -193,32 +198,77 @@ pub fn spawn_with_takes(
 /// How often static destination hostnames are re-resolved.
 pub const RESOLVE_PERIOD: Duration = Duration::from_secs(5);
 
+/// How often the console's destination status is sent.
+pub const STATUS_PERIOD: Duration = Duration::from_secs(1);
+
 /// One re-resolve round: (destination name, address or None).
 pub type Resolved = Vec<(String, Option<SocketAddr>)>;
 
-/// Re-resolve `hosts` ((name, host, port)) every `period` on a thread of
-/// its own, sending each round's answers. No hostnames = no thread (the
-/// receiver never yields). Stops with `stop`.
+/// [`spawn_resolver_with_kick`] with nothing to kick it.
 pub fn spawn_resolver(
     hosts: Vec<(String, String, u16)>,
     period: Duration,
     stop: Arc<AtomicBool>,
-    resolve: impl Fn(&str, u16) -> Option<SocketAddr> + Send + 'static,
+    resolve: impl Fn(&str, u16) -> Option<SocketAddr> + Send + Sync + 'static,
+) -> Receiver<Resolved> {
+    spawn_resolver_with_kick(hosts, period, stop, resolve, crossbeam_channel::never())
+}
+
+/// Resolve `hosts` ((name, host, port)) on a thread of its own: once
+/// straight away, then every `period`, and at once whenever `kick`
+/// yields (the console's ↻). Each distinct host is looked up once per
+/// round, all of them in parallel, and each answer is sent the moment it
+/// arrives — so one `.local` laptop that is off the network (a ~5 s
+/// miss) holds up nobody else. No hostnames = no thread (the receiver
+/// never yields). Stops with `stop`.
+pub fn spawn_resolver_with_kick(
+    hosts: Vec<(String, String, u16)>,
+    period: Duration,
+    stop: Arc<AtomicBool>,
+    resolve: impl Fn(&str, u16) -> Option<SocketAddr> + Send + Sync + 'static,
+    kick: Receiver<()>,
 ) -> Receiver<Resolved> {
     if hosts.is_empty() {
         return crossbeam_channel::never();
     }
-    let (tx, rx) = crossbeam_channel::bounded::<Resolved>(4);
+    let mut by_host: Vec<(String, Vec<(String, u16)>)> = Vec::new();
+    for (name, host, port) in hosts {
+        match by_host.iter_mut().find(|(h, _)| *h == host) {
+            Some((_, dests)) => dests.push((name, port)),
+            None => by_host.push((host, vec![(name, port)])),
+        }
+    }
+    let (tx, rx) = crossbeam_channel::bounded::<Resolved>(64);
     let spawned = std::thread::Builder::new().name("simply-tussen resolve".into()).spawn(move || {
-        let mut next = Instant::now() + period;
+        let mut kick = kick;
+        let mut next = Instant::now();
         while !stop.load(Ordering::Relaxed) {
-            if Instant::now() < next {
-                std::thread::sleep(Duration::from_millis(50).min(period));
-                continue;
+            let now = Instant::now();
+            if now < next {
+                match kick.recv_timeout((next - now).min(Duration::from_millis(50))) {
+                    Ok(()) => while kick.try_recv().is_ok() {},
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        kick = crossbeam_channel::never();
+                        continue;
+                    }
+                }
             }
             next = Instant::now() + period;
-            let round: Resolved = hosts.iter().map(|(n, h, p)| (n.clone(), resolve(h, *p))).collect();
-            if let Err(crossbeam_channel::TrySendError::Disconnected(_)) = tx.try_send(round) {
+            let gone = AtomicBool::new(false);
+            std::thread::scope(|s| {
+                for (host, dests) in &by_host {
+                    let (tx, resolve, gone) = (&tx, &resolve, &gone);
+                    s.spawn(move || {
+                        let ip = resolve(host, 0).map(|a| a.ip());
+                        let round = dests.iter().map(|(n, p)| (n.clone(), ip.map(|ip| SocketAddr::new(ip, *p)))).collect();
+                        if tx.send(round).is_err() {
+                            gone.store(true, Ordering::Relaxed);
+                        }
+                    });
+                }
+            });
+            if gone.load(Ordering::Relaxed) {
                 break;
             }
         }
@@ -343,6 +393,18 @@ struct Loop {
     hub_port: u16,
     /// Static destination re-resolve rounds ([`spawn_resolver`]).
     resolved: Receiver<Resolved>,
+    /// The console's ↻ → the resolver: look every name up now.
+    kick: Option<crossbeam_channel::Sender<()>>,
+    /// One connected socket per static destination address, so the
+    /// kernel's "nobody listening" reaches the status column ([`reach`]).
+    conns: HashMap<SocketAddr, Conn>,
+    /// Datagram totals at the last status, for the rates: OSC by
+    /// destination address, RTP by stream address.
+    last_osc: HashMap<SocketAddr, u64>,
+    last_rtp: HashMap<SocketAddr, u64>,
+    last_status: Instant,
+    /// Publish the status on the next round (a lookup answered, ↻).
+    status_due: bool,
     /// The take being written, and where to look for a new one.
     recorder: Option<Arc<Recorder>>,
     record: Option<Slot>,
@@ -383,6 +445,62 @@ impl Loop {
             stats: Stats::default(),
             hub_port: config.osc.listen_port,
             resolved: crossbeam_channel::never(),
+            kick: None,
+            conns: HashMap::new(),
+            last_osc: HashMap::new(),
+            last_rtp: HashMap::new(),
+            last_status: Instant::now(),
+            status_due: true,
+        }
+    }
+
+    /// Every static destination's status, for the console: polls the
+    /// sockets for errors the kernel holds, drops the sockets of addresses
+    /// no destination uses any more, and — while a page is open — sends
+    /// the list. Called about once a second and when something changed.
+    fn publish_status(&mut self, now: Instant) {
+        self.status_due = false;
+        let secs = now.duration_since(self.last_status).as_secs_f32().max(0.05);
+        self.last_status = now;
+        let live: HashSet<SocketAddr> = self.router.statics.iter().filter(|s| s.resolved).map(|s| s.addr).collect();
+        self.conns.retain(|a, _| live.contains(a));
+        for c in self.conns.values_mut() {
+            c.poll(now);
+        }
+        let rtp_reach: HashMap<SocketAddr, reach::Reach> =
+            self.audio.as_ref().and_then(|a| a.static_reach.lock().ok().map(|m| m.clone())).unwrap_or_default();
+        let rate = |last: &mut HashMap<SocketAddr, u64>, addr: SocketAddr, sent: u64| {
+            // A socket new since the last status sent all of it in this window.
+            let before = last.insert(addr, sent).unwrap_or(0);
+            sent.saturating_sub(before) as f32 / secs
+        };
+        let mut list = Vec::with_capacity(self.router.statics.len());
+        for s in &self.router.statics {
+            let addr = s.resolved.then_some(s.addr);
+            let osc_reach = addr.and_then(|a| self.conns.get(&a)).map(|c| &c.reach);
+            let osc = reach::Seen {
+                reach: osc_reach,
+                rate: match (addr, osc_reach) {
+                    (Some(a), Some(r)) => rate(&mut self.last_osc, a, r.sent),
+                    _ => 0.0,
+                },
+            };
+            let rtp = s.rtp_port.map(|port| {
+                let at = addr.map(|a| SocketAddr::new(a.ip(), port));
+                let r = at.and_then(|a| rtp_reach.get(&a));
+                let rate = match (at, r) {
+                    (Some(a), Some(r)) => rate(&mut self.last_rtp, a, r.sent),
+                    _ => 0.0,
+                };
+                (port, reach::Seen { reach: r, rate })
+            });
+            let d = reach::Dest { name: &s.name, host: &s.host, port: s.port, addr, lookup: s.lookup };
+            list.push(reach::status(d, osc, rtp, now));
+        }
+        if let Some(c) = &self.console {
+            if c.link.tap.active() {
+                c.link.tap.send(Event::DestStatus(list));
+            }
         }
     }
 
@@ -391,10 +509,19 @@ impl Loop {
     fn apply_resolved(&mut self, round: Resolved) {
         let mut changed = false;
         for (name, addr) in round {
+            let before = self.router.statics.iter().find(|s| s.name == name).map(|s| (s.lookup, s.host.clone()));
             if let Some(a) = self.router.set_static_addr(&name, addr) {
                 log::info!("destination {name} now at {a}");
                 changed = true;
             }
+            match (addr, before) {
+                (None, Some((Lookup::Pending | Lookup::Ok, host))) => {
+                    log::warn!("destination {name}: {host} doesn't resolve; retrying every {} s", RESOLVE_PERIOD.as_secs())
+                }
+                (Some(_), Some((Lookup::Failed, _))) if !changed => log::info!("destination {name} resolves again"),
+                _ => {}
+            }
+            self.status_due = true;
         }
         if changed {
             if let Some(audio) = &self.audio {
@@ -525,6 +652,9 @@ impl Loop {
                 self.report(elapsed, malformed.load(Ordering::Relaxed), quiet);
                 last_report = now;
             }
+            if self.status_due || now.duration_since(self.last_status) >= STATUS_PERIOD {
+                self.publish_status(now);
+            }
         }
     }
 
@@ -560,6 +690,27 @@ impl Loop {
                 if let Some(c) = &mut self.console {
                     c.watch = w;
                 }
+            }
+            RouterCmd::Resolve => {
+                // Look every name up now and forget earlier send errors, so
+                // one from before the receiver started stops showing.
+                log::info!("console: re-resolving destinations");
+                if let Some(k) = &self.kick {
+                    let _ = k.try_send(());
+                }
+                self.router.mark_lookups_pending();
+                for c in self.conns.values_mut() {
+                    c.forget_errors();
+                }
+                if let Some(a) = &self.audio {
+                    a.reach_epoch.fetch_add(1, Ordering::Relaxed);
+                    if let Ok(mut m) = a.static_reach.lock() {
+                        for r in m.values_mut() {
+                            r.last_err = None;
+                        }
+                    }
+                }
+                self.status_due = true;
             }
         }
     }
@@ -675,22 +826,30 @@ impl Loop {
     /// Re-bundle per destination, split at max_packet, never block — a
     /// full buffer or an unreachable destination is a count.
     fn deliver(&mut self, out: &UdpSocket) {
-        for (dest, encoded) in self.per_dest.iter_mut() {
+        let now = Instant::now();
+        let (per_dest, conns, router, stats) = (&mut self.per_dest, &mut self.conns, &self.router, &mut self.stats);
+        for (dest, encoded) in per_dest.iter_mut() {
             if encoded.is_empty() {
                 continue;
             }
             let n = encoded.len() as u64;
             let mut failed = false;
+            // A static destination goes out on its own connected socket
+            // (errors are seen); devices share the send socket.
+            let is_static = router.statics.iter().any(|s| s.resolved && s.addr == *dest);
             for datagram in bundles::pack(encoded, self.max_packet) {
-                if out.send_to(&datagram, dest).is_err() {
-                    failed = true;
-                }
+                let sent = if is_static {
+                    conns.entry(*dest).or_insert_with(|| Conn::new(*dest)).send(&datagram, now)
+                } else {
+                    out.send_to(&datagram, dest).is_ok()
+                };
+                failed |= !sent;
             }
             encoded.clear();
             if failed {
-                self.stats.send_errors += 1;
+                stats.send_errors += 1;
             } else {
-                self.stats.msgs_out += n;
+                stats.msgs_out += n;
             }
         }
         // Devices come and go: don't keep buffers for every one ever seen.

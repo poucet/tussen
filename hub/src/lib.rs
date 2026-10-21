@@ -27,6 +27,7 @@ pub mod ndi;
 pub mod pad;
 pub mod prng;
 pub mod rdns;
+pub mod reach;
 pub mod record;
 pub mod replay;
 pub mod router;
