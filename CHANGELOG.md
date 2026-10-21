@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+#### The websocket's signals wait for sync point 1, like td's · 2026-10-21 23:26 · qnlrwzup
+
+- **`osc` and `midi` frames on `/ws` now leave the hub when td gets the
+  same signal**, held back by `signal_delay_ms` in the same delay line as
+  the UDP output. They used to go out the moment they arrived, so a
+  browser page (a shader lab) got its signals early compared with the
+  music. A page gets sync point 1 only, never a device's round trip.
+  Replayed signals wait the same.
+- **`ts` is unchanged**: it is still when the hub received the signal, so a
+  frame now arrives `signal_delay_ms` after its `ts`. Consumers that sort
+  by `ts` should keep sorting: just after the delay is lowered, newer
+  frames can overtake older ones. `audio`, `link` and `addrs` are not
+  delayed. Details: docs/guides/signals-websocket.md, *Timing*.
+- **The console looks the same.** It drew markers at `ts + signal delay`
+  already, which is when they now arrive: they still enter at the right
+  edge when their time comes, they just reach the page later. The osc tab's history shows each message
+  `signal_delay_ms` later than before. The page keeps its clock right
+  without audio frames too, and keeps markers and lanes in `ts` order when
+  the delay is lowered. Feed events a full delay line drops count as
+  delay-line drops.
+
 #### Fix: lots of OSC no longer makes the console unresponsive · 2026-10-21
 
 - **`addrs` frames carry only what changed.** The hub used to send its whole

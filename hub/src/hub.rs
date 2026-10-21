@@ -12,6 +12,12 @@
 //! message waits in that destination's [`DelayLine`] and is re-bundled
 //! with whatever else is due when its time comes. The loop wakes for the
 //! earliest due time, so delays land within about a millisecond.
+//!
+//! The console's websocket feed (`osc`/`midi` frames) hangs off the same
+//! release point: its events wait in a [`DelayLine`] of their own for sync
+//! point 1, exactly as td's datagrams do, so a page (the console, a shader
+//! lab) gets each signal when the visuals destination does. Their `ts`
+//! stays the receipt time.
 
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, UdpSocket};
@@ -421,6 +427,10 @@ struct ConsoleSide {
     seen: SeenTable,
     watch: Arc<HashSet<String>>,
     last_addrs: Instant,
+    /// `osc`/`midi` events held for sync point 1 ([`feed_delay_ms`]).
+    line: DelayLine<Event>,
+    /// Reused per round: the events whose time has come.
+    released: Vec<Event>,
 }
 
 impl Loop {
@@ -440,6 +450,8 @@ impl Loop {
                 seen: SeenTable::new(),
                 watch: Arc::new(HashSet::new()),
                 last_addrs: Instant::now(),
+                line: DelayLine::default(),
+                released: Vec::new(),
             }),
             per_dest: HashMap::new(),
             stats: Stats::default(),
@@ -550,7 +562,8 @@ impl Loop {
 
     /// The earliest due time across every delay line.
     fn next_due(&self) -> Option<Instant> {
-        self.lines.values().filter_map(DelayLine::next_due).min()
+        let feed = self.console.as_ref().and_then(|c| c.line.next_due());
+        self.lines.values().filter_map(DelayLine::next_due).chain(feed).min()
     }
 
     fn run(
@@ -629,6 +642,9 @@ impl Loop {
                 }
             }
             self.deliver(out);
+            if let Some(c) = &mut self.console {
+                c.release(now);
+            }
 
             let pruned = self.router.prune(now);
             if !pruned.is_empty() {
@@ -778,7 +794,7 @@ impl Loop {
         }
         let console = &mut self.console;
         if let Some(c) = console.as_mut() {
-            tap(c, m, from, class, now);
+            tap(c, m, from, class, now, feed_delay_ms(&self.sync));
         }
         let mut encoded: Option<Vec<u8>> = None;
         let (per_dest, lines) = (&mut self.per_dest, &mut self.lines);
@@ -861,13 +877,20 @@ impl Loop {
         self.lines.retain(|_, l| !l.is_empty());
     }
 
+    /// Items every delay line dropped, the console feed's included.
+    fn delay_drops(&self) -> u64 {
+        let feed = self.console.as_ref().map_or(0, |c| c.line.dropped);
+        self.lines.values().map(|l| l.dropped).sum::<u64>() + feed
+    }
+
     fn report(&mut self, elapsed: Duration, dropped: u64, quiet: bool) {
         let secs = elapsed.as_secs_f64();
+        let delay_drops = self.delay_drops();
         let totals = Trouble {
             malformed: dropped,
             send_errors: self.stats.send_errors,
             audio_overflows: self.audio.as_ref().map_or(0, |a| a.overflows.load(Ordering::Relaxed)),
-            delay_drops: self.lines.values().map(|l| l.dropped).sum(),
+            delay_drops,
             console_drops: self.console.as_ref().map_or(0, |c| c.link.tap.dropped()),
         };
         if let Some(w) = self.stats.trouble.tick(totals, Instant::now()) {
@@ -885,8 +908,8 @@ impl Loop {
                     format!(" audio={rate:.1}pkt/s audio_ovf={}", a.overflows.load(Ordering::Relaxed))
                 })
                 .unwrap_or_default();
-            let queued: usize = self.lines.values().map(DelayLine::len).sum();
-            let delay_drops: u64 = self.lines.values().map(|l| l.dropped).sum();
+            let feed = self.console.as_ref().map_or(0, |c| c.line.len());
+            let queued: usize = self.lines.values().map(DelayLine::len).sum::<usize>() + feed;
             let delayed = if queued > 0 || delay_drops > 0 {
                 format!(" delayed={queued} delay_drop={delay_drops}")
             } else {
@@ -912,12 +935,40 @@ impl Loop {
     }
 }
 
+impl ConsoleSide {
+    /// Publish the feed events whose time has come — in the same round,
+    /// from the same `now`, as the destinations' delayed datagrams.
+    fn release(&mut self, now: Instant) {
+        if self.line.next_due().is_none_or(|d| d > now) {
+            return;
+        }
+        self.line.pop_due(now, &mut self.released);
+        let active = self.link.tap.active();
+        for ev in self.released.drain(..) {
+            if active {
+                self.link.tap.send(ev);
+            }
+        }
+    }
+}
+
+/// How long the websocket feed holds a signal: sync point 1, what the
+/// visuals destination (td) gets. A page sits where td sits — on the
+/// hub's machine, with the audio coming back through the same mixer — so
+/// it takes td's delay, not a device's round trip (which lines a remote
+/// device up with td's NDI picture, and a page draws its own).
+fn feed_delay_ms(sync: &SyncState) -> u32 {
+    sync.delay_ms("", sync::DestKind::Td)
+}
+
 /// Feed the console: every address into the seen table — inbound ones
 /// (and replayed ones) as `in`, hub-generated ones (/tussen/clock/…,
 /// /tussen/midi/…) as `out`; MIDI-class signals, and watched OSC
-/// addresses, as timeline events — only while a page is connected.
-/// Timestamps are receipt time, before any delay.
-fn tap(c: &mut ConsoleSide, m: &Message, from: Src, class: Class, now: Instant) {
+/// addresses, as timeline events — only while a page is connected. The
+/// seen table is noted at once; the events wait `delay_ms` (sync point 1)
+/// in the console's delay line, like td's datagrams. Timestamps are
+/// receipt time, before any delay.
+fn tap(c: &mut ConsoleSide, m: &Message, from: Src, class: Class, now: Instant, delay_ms: u32) {
     if m.address.starts_with("/tussen/hub/") {
         return;
     }
@@ -927,15 +978,22 @@ fn tap(c: &mut ConsoleSide, m: &Message, from: Src, class: Class, now: Instant) 
     if !c.link.tap.active() {
         return;
     }
-    if class == Class::Midi {
-        c.link.tap.send(Event::Midi { ts, addr: m.address.clone(), v });
+    let ev = if class == Class::Midi {
+        Event::Midi { ts, addr: m.address.clone(), v }
     } else if c.watch.contains("*") || c.watch.contains(&m.address) {
         let src = match from {
             Src::Net(a) => a.to_string(),
             Src::Hub => "hub".to_owned(),
             Src::Replay => "replay".to_owned(),
         };
-        c.link.tap.send(Event::Osc { ts, addr: m.address.clone(), v, src });
+        Event::Osc { ts, addr: m.address.clone(), v, src }
+    } else {
+        return;
+    };
+    if delay_ms == 0 {
+        c.link.tap.send(ev);
+    } else {
+        c.line.push(sync::due(now, delay_ms), ev);
     }
 }
 

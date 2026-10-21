@@ -218,7 +218,7 @@ both set by hand:
 
 | | Number | What waits | Who gets it |
 |---|---|---|---|
-| **Sync point 1** | signal delay | MIDI + OSC, the beat included; never the audio | the visuals destination, and every device |
+| **Sync point 1** | signal delay | MIDI + OSC, the beat included; never the audio | the visuals destination, every device, and the websocket (the console, browser pages) |
 | **Sync point 2** | TD round trip | everything the hub sends a device, its audio included | every device set to *in time with TD* |
 
 The engine is never delayed: it makes the audio.

@@ -117,6 +117,20 @@ frame rather than doing work per message.
 clock signals as ordinary OSC — `/tussen/clock/bpm`, `/beat`, `/phase`,
 `/running`, `/onbeat` (docs/guides/osc-signals.md) — covered by `watch "*"`.
 
+**Timing: the signals wait for sync point 1.** `osc` and `midi` frames leave
+the hub when the visuals destination (`td`) gets the same signal over UDP:
+held back by `signal_delay_ms`, from the same delay line, so a page lines
+up with the music the way TouchDesigner does. A page gets sync point 1 only,
+never a device's `td_round_trip_ms`: it renders on the hub's machine, next
+to the audio, like TD, and draws its own picture rather than watching TD's.
+`ts` is still when the hub *received* the signal, so a frame arrives
+`signal_delay_ms` after its `ts` (recording and the console's alignment
+rely on that). Signals played from a take wait the same. What does not wait:
+`audio` (raw, like TD's audio), `link` (the console draws its beat grid at
+`ts + signal_delay_ms`), and `addrs` (`last_ts` is receipt time). Just after
+the delay is lowered, newer frames can overtake older ones for up to the
+old delay: keep anything you sort by `ts` sorted.
+
 **Audio is not on the websocket.** The `audio` frames are 3-number level
 summaries for drawing a waveform. A browser page that wants the actual music
 captures it itself: `getUserMedia` on the same loopback/capture device the hub

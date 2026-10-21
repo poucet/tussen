@@ -652,6 +652,119 @@ fn a_second_local_page_reads_the_feed_but_cannot_command() {
     drop(console);
 }
 
+/// The websocket feed leaves from the same release point as the UDP
+/// output (sync point 1): a page gets each `osc`/`midi` frame no earlier
+/// than `signal_delay_ms` after the hub received it, when td gets its
+/// datagram — for network OSC, hub-made MIDI and a replay alike — and
+/// `ts` is still the receipt time, not the release.
+#[test]
+fn the_websocket_feed_is_held_for_sync_point_1_like_td() {
+    const DELAY_MS: u64 = 80;
+    let td = Recorder::new();
+    let config: Config = toml::from_str(&format!(
+        r#"
+        [osc]
+        listen_port = 0
+        [[dest]]
+        name = "td"
+        host = "127.0.0.1"
+        port = {}
+        subscribe = ["/ext/", "/tussen/"]
+        exclude = ["/tussen/hub/"]
+        [sync]
+        signal_delay_ms = {DELAY_MS}
+        td_round_trip_ms = 40       # a device's; the feed must not get it
+        "#,
+        td.port
+    ))
+    .unwrap();
+    let (console, router_side) = console::start(ConsoleOptions {
+        port: 0,
+        osc_port: 9000,
+        config: None,
+        statics: config.dests.iter().map(|d| (d.name.clone(), d.kind())).collect(),
+        sample_rate: 48000,
+        state: SyncState::new(config.sync.clone(), config.remap.clone()),
+    })
+    .unwrap();
+    let (gen_tx, gen_rx) = crossbeam_channel::bounded::<Message>(64);
+    let (replay_tx, replay_rx) = crossbeam_channel::bounded::<Message>(64);
+    let hub = hub::spawn_with_takes(
+        config,
+        gen_rx,
+        true,
+        Extras { audio: None, console: Some(router_side) },
+        hub::Takes { replay: Some(replay_rx), ..hub::Takes::default() },
+    )
+    .unwrap();
+    let hub_addr = SocketAddr::from(([127, 0, 0, 1], hub.addr().port()));
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut page = connect_as(console.addr, "/ws?readonly=1", None);
+    expect(&mut page, "hello", Duration::from_secs(2), |_| true);
+    send(&mut page, json!({"t":"watch","addrs":["*"]}));
+    std::thread::sleep(Duration::from_millis(50));
+    td.drain(Duration::from_millis(10));
+
+    // (label, frame type, address, how it enters the hub)
+    type Inject<'a> = Box<dyn Fn(f32) + 'a>;
+    let sources: Vec<(&str, &str, &str, Inject)> = vec![
+        (
+            "network OSC",
+            "osc",
+            "/ext/delayed",
+            Box::new(|v| {
+                sender.send_to(&Message::new("/ext/delayed").arg(Value::Float32(v)).encode().unwrap(), hub_addr).unwrap();
+            }),
+        ),
+        (
+            "hub-made MIDI",
+            "midi",
+            "/tussen/midi/cc/9",
+            Box::new(|v| gen_tx.send(Message::new("/tussen/midi/cc/9").arg(Value::Float32(v))).unwrap()),
+        ),
+        (
+            "replay",
+            "osc",
+            "/ext/replayed",
+            Box::new(|v| replay_tx.send(Message::new("/ext/replayed").arg(Value::Float32(v))).unwrap()),
+        ),
+    ];
+    for (label, kind, addr, inject) in &sources {
+        for i in 0..5 {
+            let v = i as f32;
+            let before_us = console::now_us();
+            let sent = Instant::now();
+            inject(v);
+            // The page's copy: read until it arrives.
+            let frame = expect(&mut page, kind, Duration::from_secs(2), |f| f["addr"] == *addr && f["v"] == v as f64);
+            let ws_at = Instant::now();
+            // td's copy, timestamped on arrival by its own thread.
+            let td_at = loop {
+                match td.rx.recv_timeout(Duration::from_millis(500)) {
+                    Ok((t, m)) if m.address == *addr && m.args.first().and_then(Value::as_float) == Some(v) => break t,
+                    Ok(_) => {}
+                    Err(_) => panic!("{label}: td got no {addr}"),
+                }
+            };
+            let ws_late = ws_at.duration_since(sent);
+            let td_late = td_at.duration_since(sent);
+            let ts = frame["ts"].as_u64().unwrap();
+            eprintln!("{label} #{i}: ws after {ws_late:?}, td after {td_late:?}, ts − sent = {} µs", ts as i64 - before_us as i64);
+            assert!(ws_late >= Duration::from_millis(DELAY_MS), "{label}: the page got it early: {ws_late:?}");
+            // Same release, different pipes (UDP vs console thread → page
+            // thread → TCP); 15 ms of headroom for a loaded test machine.
+            let skew = if ws_at > td_at { ws_at - td_at } else { td_at - ws_at };
+            assert!(skew <= Duration::from_millis(15), "{label}: ws {ws_late:?} vs td {td_late:?}");
+            assert!(ws_late < Duration::from_millis(DELAY_MS + 30), "{label}: the round trip leaked in: {ws_late:?}");
+            // ts is when the hub received it, not when it was released.
+            assert!(ts >= before_us && ts < before_us + 20_000, "{label}: ts {ts} moved (sent at {before_us})");
+        }
+    }
+    drop(page);
+    drop(hub);
+    drop(console);
+}
+
 #[test]
 fn ndi_frames_reach_a_local_page_newest_first() {
     let (console, _router_side) = console::start(ConsoleOptions {

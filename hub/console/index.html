@@ -212,6 +212,12 @@ function signalDelayMs(dest, sync) {
 function audioDelayMs(dest, sync) { return followsTd(dest) && sync ? sync.td_round_trip_ms || 0 : 0; }
 // The timeline draws MIDI/OSC/the Link grid at ts + signal_delay_ms (sync point 1).
 function shiftTs(tsUs, dMs) { return tsUs + dMs * 1000; }
+// The hub holds `osc`/`midi` frames for sync point 1 (as it does td's
+// datagrams) and stamps them with when it received them: a frame with ts
+// left the hub at ts + signal delay — which is also where the timeline
+// draws it, so a marker enters at the live edge. The hub clock is at least
+// this when the frame arrives (the page's clock offset reads it).
+function releasedTs(s, tsUs) { return shiftTs(tsUs, (s.sync && s.sync.signal_delay_ms) || 0); }
 
 // --- time <-> pixel -----------------------------------------------------------
 // view = {endUs, windowUs}; x = width at endUs, 0 at endUs - windowUs.
@@ -374,10 +380,22 @@ function endpointLines(ep) {
   if (ep.hostname) out.push(ep.hostname + ':' + ep.port);
   return out;
 }
+// Append keeping ts ascending (draw() binary-searches). Frames arrive in ts
+// order, except just after the signal delay is lowered: the hub's delay line
+// then lets the newer, earlier-due ones out first. O(1) in the usual case.
+function pushByTs(arr, e) {
+  let i = arr.length;
+  if (!i || arr[i - 1].ts <= e.ts) { arr.push(e); return; }
+  while (i > 0 && arr[i - 1].ts > e.ts) i--;
+  arr.splice(i, 0, e);
+}
 function pushSeries(s, addr, ts, v, src) {
   let ser = s.osc.get(addr);
   if (!ser) { ser = { ts: [], v: [], src: src }; s.osc.set(addr, ser); }
-  ser.ts.push(ts); ser.v.push(v); ser.src = src;
+  let i = ser.ts.length;
+  if (i && ser.ts[i - 1] > ts) { while (i > 0 && ser.ts[i - 1] > ts) i--; ser.ts.splice(i, 0, ts); ser.v.splice(i, 0, v); }   // see pushByTs
+  else { ser.ts.push(ts); ser.v.push(v); }
+  ser.src = src;
   // Trim in batches: only once a quarter of the series is older than KEEP_US,
   // so each splice removes >= n/4 and a message costs O(1) amortized. (A
   // splice per message cost O(window) each: a 3 kHz address took ~110 ms of
@@ -498,10 +516,10 @@ function applyMessage(s, m, localMs) {
     }
     case 'midi':
       histPush(s, { ts: m.ts, addr: m.addr, v: m.v, src: 'midi' });
-      s.midi.push({ ts: m.ts, addr: m.addr, v: m.v, kind: midiKind(m.addr, m.v) });
+      pushByTs(s.midi, { ts: m.ts, addr: m.addr, v: m.v, kind: midiKind(m.addr, m.v) });
       if (s.watch.includes(m.addr)) pushSeries(s, m.addr, m.ts, m.v, 'midi');   // a watched MIDI address gets a lane too
       if (s.midi.length > 30000) s.midi.splice(0, 10000);
-      s.latestTs = Math.max(s.latestTs, m.ts);
+      s.latestTs = Math.max(s.latestTs, releasedTs(s, m.ts));
       return 'midi';
     case 'osc':
       histPush(s, { ts: m.ts, addr: m.addr, v: m.v, src: m.src });
@@ -510,7 +528,7 @@ function applyMessage(s, m, localMs) {
       // Only the lanes keep a series: watch "*" (the osc tab) feeds the
       // history above, not a series per address.
       if (signalClass(m.addr) !== 'midi' && s.watch.includes(m.addr)) pushSeries(s, m.addr, m.ts, m.v, m.src);
-      s.latestTs = Math.max(s.latestTs, m.ts);
+      s.latestTs = Math.max(s.latestTs, releasedTs(s, m.ts));
       return 'osc';
     case 'addrs': {
       const list = m.list || [];
@@ -748,9 +766,9 @@ function alignStats(s, dMs, fromUs, toUs) {
 // --- mock hub (?mock=1) --------------------------------------------------------
 // Deterministic given the tick times. Kicks at 120 bpm; MIDI note-ons lead the
 // kicks by leadMs (the audio is made from them, so it arrives after); an OSC
-// trigger leads them by oscLeadMs. The ts it reports is the un-delayed hub time,
-// exactly like the real hub: delays only move what the page draws, so set the
-// signal delay to leadMs and the markers sit on the kicks.
+// trigger leads them by oscLeadMs. Like the real hub, it holds `midi`/`osc`
+// frames for the signal delay and stamps them with the un-delayed hub time:
+// set the signal delay to leadMs and the markers sit on the kicks.
 function createMockHub(opts) {
   // peers: how many Link peers it hears (0 = the hub waits); joinMs: with
   // peers 0, three peers in a session at joinBpm appear that long after
@@ -810,6 +828,7 @@ function createMockHub(opts) {
   const seen = new Map();     // addr -> {last_ts, hits: [ts...], v, count}
   const errors = [];          // protocol violations from the page
   const out = [];
+  const held = [];            // midi/osc frames waiting out the signal delay, due ascending
   const sentAddrs = new Map();   // addr -> the entry last sent (JSON), for `addrs` diffs
   const touch = (addr, ts, v, dir) => { let e = seen.get(addr); if (!e) { e = { last_ts: ts, hits: [], v: 0, min: v, max: v, count: 0, dirs: 0 }; seen.set(addr, e); } e.last_ts = ts; e.v = v; e.min = Math.min(e.min, v); e.max = Math.max(e.max, v); e.count++; e.dirs |= dir; e.hits.push(ts); if (e.hits.length > 400) e.hits.splice(0, 200); };
   const MOCK_OSC = { port: 9000, ips: ['192.0.2.10'], hostname: 'mock-hub.local' };
@@ -832,8 +851,17 @@ function createMockHub(opts) {
   const allDests = () => st.dests.concat(questPresent ? [{ name: 'quest', kind: 'device', follow: st.questFollow }] : []).map(d => Object.assign({}, d));
   // MIDI/clock signals are hub-made (out, like the real hub's generated
   // ones); device and /ext/ OSC arrives on :9000 (in).
-  function emitMidi(ts, addr, v) { touch(addr, ts, v, 2); out.push({ t: 'midi', ts: ts, addr: addr, v: v }); }
-  function emitOsc(ts, addr, v, src) { touch(addr, ts, v, 1); if (st.watch.includes('*') || st.watch.includes(addr)) out.push({ t: 'osc', ts: ts, addr: addr, v: v, src: src }); }
+  // Like the hub: the seen table at once, the frame after the signal delay.
+  function feed(ts, m) {
+    const d = st.sync.signal_delay_ms * 1000;
+    if (!d) { out.push(m); return; }
+    const due = ts + d; let i = held.length;
+    while (i > 0 && held[i - 1].due > due) i--;   // a lowered delay lets newer frames out first
+    held.splice(i, 0, { due: due, m: m });
+  }
+  function release(b) { let n = 0; while (n < held.length && held[n].due <= b) out.push(held[n++].m); held.splice(0, n); }
+  function emitMidi(ts, addr, v) { touch(addr, ts, v, 2); feed(ts, { t: 'midi', ts: ts, addr: addr, v: v }); }
+  function emitOsc(ts, addr, v, src) { touch(addr, ts, v, 1); if (st.watch.includes('*') || st.watch.includes(addr)) feed(ts, { t: 'osc', ts: ts, addr: addr, v: v, src: src }); }
   function kickSample(tUs) {
     const rel = tUs - t0 - kickOffsetUs;
     let y = 0.004 * rnd();
@@ -903,6 +931,7 @@ function createMockHub(opts) {
       list.sort((a, b2) => (a.addr < b2.addr ? -1 : a.addr > b2.addr ? 1 : 0));
       if (full || list.length) out.push({ t: 'addrs', full: full, list: list });
     }
+    release(b);
     lastUs = b;
     return out.splice(0, out.length);
   }
@@ -962,7 +991,7 @@ function round4(x) { return Math.round(x * 1e4) / 1e4; }
 const api = {
   BLOCK_FRAMES, MAX_DELAY_MS, FOLLOWS, KEEP_US, MIN_WINDOW_US, MAX_WINDOW_US,
   TEMPO_MIN, TEMPO_MAX, LINK_KEEP, LINK_STALE_MS, LINK_MODES, clampTempo, beatGrid, linkLive, normPeers, peerRows, peerSummary, linkLabel, linkModeNote, replayLabel, normRecord, recordLabel,
-  signalClass, clampDelay, signalDelayMs, audioDelayMs, shiftTs,
+  signalClass, clampDelay, signalDelayMs, audioDelayMs, shiftTs, releasedTs, pushByTs,
   timeToX, xToTime, zoomView, gridStepMs, blockDurUs,
   AudioRing, midiKind, createState, resetBuffers, applyMessage, sortedAddrs, isHot, HEAT_MS, matchPattern,
   HISTORY_CAP, HISTORY_SLACK, histPush, historyRows, latestSeenTs, esc, fmtV, addrRow, seenRow, histRow, patchRows, renderPlan, seenRows, endpointText, endpointLines,

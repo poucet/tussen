@@ -91,7 +91,7 @@ MIDI / gamepad / Link ──► simply-tussen :9000 ◄── OSC: devices, djay
                                ├── OSC/MIDI (signal delay) ──────► td (visuals)
                                ├── RTP audio :5006 ──────────────► td (visuals)
                                ├── OSC/MIDI + RTP (both delays) ─► registered devices
-                               └── http + ws :9098 ──────────────► the console, your scripts
+                               └── http + ws :9098 (sig. delay) ─► the console, your scripts
 ```
 
 Devices register themselves (an OSC `/tussen/hub/hello`), get the signal fan-
@@ -100,8 +100,10 @@ Static destinations live in `hub.toml`.
 
 **The two delays.** The music takes time to come back through a mixer, and a
 visuals chain takes time to render. `signal_delay_ms` holds MIDI/OSC back so
-they land with the returning music; `td_round_trip_ms` holds a device's whole
-bundle (audio included) back so it lands with the visuals. Set both on the
+they land with the returning music — for td and for the console's websocket
+(the console and browser pages such as a shader lab get signals when td
+does); `td_round_trip_ms` holds a device's whole bundle (audio included)
+back so it lands with the visuals. Set both on the
 console — the anchored waveform widget holds a beat line still at its centre,
 and you drag the waveform until the kicks sit on the line.
 

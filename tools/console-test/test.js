@@ -445,6 +445,73 @@ near(L.alignStats(run30.S, 0, run30.S.latestTs - 4e6, run30.S.latestTs).medianMs
 const firstOn = run.msgs.find(m => m.t === 'midi' && m.addr === '/tussen/midi/note/36' && m.v > 0);
 ok(Math.abs(run.hub.kickTimeUs(0) - firstOn.ts - 70e3) < 1, 'note-on ts = kick - 70 ms exactly');
 
+// ---- 6a. the feed is held for sync point 1 -----------------------------------------
+section('feed held for the signal delay');
+{
+  // Like the hub: midi/osc frames leave at ts + signal delay (when td gets
+  // its datagram), ts still the receipt time. Run with 70 ms and 0 ms.
+  const go = (dMs) => {
+    const hub = L.createMockHub(), S = L.createState(), got = [];
+    let worstAhead = -Infinity;
+    hub.tick(0); hub.onMessage(L.msg.watch(['*'])); hub.onMessage(L.msg.setSync({ signal_delay_ms: dMs }));
+    for (let t = 15e3; t <= 6e6; t += 15e3) {
+      for (const m of hub.tick(t)) {
+        L.applyMessage(S, m, t / 1000);
+        if (m.t === 'midi' || m.t === 'osc') got.push({ at: t, m: m });
+      }
+      worstAhead = Math.max(worstAhead, S.latestTs - t);
+    }
+    return { hub, S, got, worstAhead };
+  };
+  const d70 = go(70), d0 = go(0);
+  ok(d70.got.length > 100 && d70.got.every(g => g.at >= g.m.ts + 70e3 && g.at < g.m.ts + 70e3 + 15e3), 'every frame arrives at ts + 70 ms (within one tick)');
+  ok(d0.got.every(g => g.at < g.m.ts + 15e3), 'with no delay, at once');
+  const key = (m) => m.t + m.addr + '@' + m.ts;
+  const late = new Set(d70.got.map(g => key(g.m))), cut = 6e6 - 70e3;
+  ok(d0.got.filter(g => g.m.ts <= cut).every(g => late.has(key(g.m))), 'holding loses nothing and changes no ts');
+  ok(d70.got.every((g, i, a) => i === 0 || a[i - 1].m.ts <= g.m.ts), 'released in ts order');
+  const on = d70.got.find(g => g.m.t === 'midi' && g.m.addr === '/tussen/midi/note/36' && g.m.v > 0).m;
+  ok(Math.abs(d70.hub.kickTimeUs(0) - on.ts - 70e3) < 1, 'note-on ts still = kick - 70 ms (un-delayed)');
+  ok(L.releasedTs(d70.S, 1e6) === 1.07e6 && L.releasedTs(L.createState(), 1e6) === 1e6, 'releasedTs = ts + signal delay');
+  { // no audio (no capture device): the signal frames alone carry the clock
+    const Sn = L.createState(); L.applyMessage(Sn, { t: 'hello', sync: { signal_delay_ms: 70, td_round_trip_ms: 0 }, dests: [], remaps: [] }, 0);
+    L.applyMessage(Sn, { t: 'midi', ts: 1e6, addr: '/tussen/midi/cc/1', v: 0.5 }, 0);
+    ok(Sn.latestTs === 1.07e6 && Sn.midi[0].ts === 1e6, 'a frame received at ts says the hub is at ts + delay', Sn.latestTs);
+    L.applyMessage(Sn, { t: 'osc', ts: 2e6, addr: '/ext/x', v: 1, src: 'x' }, 0);
+    ok(Sn.latestTs === 2.07e6 && Sn.history.buf[1].ts === 2e6, 'osc too; the history keeps ts', Sn.latestTs);
+  }
+  // The page's idea of hub time (clock offset) comes from latestTs: the
+  // delayed frames must neither drag it back nor push it past the hub.
+  ok(d70.worstAhead <= 1, 'latestTs never runs ahead of the hub', d70.worstAhead);
+  const behind = d70.S.latestTs - 6e6;
+  ok(behind > -40e3, 'latestTs keeps up with the hub', behind);
+  { // lowering the delay mid-run: newer frames overtake older ones (the hub's
+    // heap lets them out on time), and the page keeps its arrays ts-ascending
+    const hub = L.createMockHub(), S = L.createState();
+    hub.tick(0); hub.onMessage(L.msg.watch(['/ext/tablet/fader1'])); S.watch = ['/ext/tablet/fader1'];
+    hub.onMessage(L.msg.setSync({ signal_delay_ms: 300 }));
+    let order = 0, prev = -Infinity;
+    for (let t = 15e3; t <= 3e6; t += 15e3) {
+      if (t === 1995e3) hub.onMessage(L.msg.setSync({ signal_delay_ms: 0 }));
+      for (const m of hub.tick(t)) { if (m.t === 'midi') { if (m.ts < prev) order++; prev = Math.max(prev, m.ts); } L.applyMessage(S, m, t / 1000); }
+    }
+    const asc = (a) => a.every((x, i) => i === 0 || a[i - 1] <= x);
+    ok(order > 0, 'lowering the delay reorders the feed', order);
+    ok(asc(S.midi.map(e => e.ts)), 'midi stays ts-ascending');
+    const ser = S.osc.get('/ext/tablet/fader1');
+    ok(ser && asc(ser.ts) && ser.ts.length === ser.v.length, 'a lane series stays ts-ascending');
+    const arr = []; for (const t of [1, 3, 2, 5, 4, 4]) L.pushByTs(arr, { ts: t });
+    ok(arr.map(e => e.ts).join() === '1,2,3,4,4,5', 'pushByTs');
+  }
+  // Alignment over what has arrived: still the markers on the kicks at 70.
+  const e = d70.S.latestTs, a = L.alignStats(d70.S, 70, e - 4e6, e);
+  near(a.medianMs, 0, bd / 1000 + 0.5, 'delayed feed: signal delay 70 still sits on the onsets');
+  ok(a.n >= 6, 'alignment sees the delayed note-ons', a.n);
+  // History rows keep the receipt ts, newest last.
+  const h = d70.S.history.buf;
+  ok(h.length > 0 && h.every((x, i) => i === 0 || h[i - 1].ts <= x.ts), 'history: receipt ts, in order');
+}
+
 // ---- 6b. Link -------------------------------------------------------------------------
 section('Link');
 {

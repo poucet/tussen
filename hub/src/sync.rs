@@ -5,7 +5,8 @@
 //! * **Sync point 1, `signal_delay_ms`.** MIDI + OSC — every signal, not
 //!   the audio — are held back so they line up with the mix returning
 //!   through the mixer. TouchDesigner (and any other `td`-kind static)
-//!   gets the signals this late and the audio undelayed.
+//!   gets the signals this late and the audio undelayed — and so does the
+//!   console's websocket feed (`osc`/`midi` frames, `ts` unchanged).
 //! * **Sync point 2, `td_round_trip_ms`.** A device gets everything the
 //!   hub sends it — signals *and* its RTP audio copy — held back by this
 //!   much more, so it lines up with TouchDesigner's NDI picture on the
@@ -25,7 +26,8 @@
 //! [`SyncState`] is an immutable snapshot: the console thread owns the
 //! authoritative copy, mutates it, and hands the router a fresh
 //! `Arc<SyncState>` — the router never holds a lock while it sends.
-//! [`DelayLine`] is the timestamped queue the router drains on time.
+//! [`DelayLine`] is the timestamped queue the router drains on time: one
+//! per destination, and one for the console's websocket feed.
 
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::{BTreeMap, BinaryHeap};
@@ -38,8 +40,10 @@ use simply_osc::{Message, Value};
 /// gets: a slider pushed to the end must not turn the hub into a
 /// five-minute buffer, and the audio sender's delay ring is this long.
 pub const MAX_DELAY_MS: u32 = 5000;
-/// Messages queued per destination before new ones are dropped (and
-/// counted): 5 s of a busy 60 Hz show is well under this.
+/// Items queued per delay line before new ones are dropped (and
+/// counted): 5 s of a busy 60 Hz show is well under this. The console
+/// feed's line holds what pages watch (`"*"`: everything routed), so it
+/// holds 5 s of up to ~13k msg/s before it drops.
 pub const DELAY_LINE_CAP: usize = 65536;
 
 /// The two signal classes: drawn differently on the
@@ -339,24 +343,24 @@ impl SyncState {
     }
 }
 
-struct Entry {
+struct Entry<T> {
     due: Instant,
     seq: u64,
-    bytes: Vec<u8>,
+    item: T,
 }
 
-impl PartialEq for Entry {
+impl<T> PartialEq for Entry<T> {
     fn eq(&self, other: &Self) -> bool {
         self.due == other.due && self.seq == other.seq
     }
 }
-impl Eq for Entry {}
-impl PartialOrd for Entry {
+impl<T> Eq for Entry<T> {}
+impl<T> PartialOrd for Entry<T> {
     fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
         Some(self.cmp(other))
     }
 }
-impl Ord for Entry {
+impl<T> Ord for Entry<T> {
     /// Reversed, so the std max-heap pops the earliest due first; `seq`
     /// keeps equal-time messages in arrival order.
     fn cmp(&self, other: &Self) -> CmpOrdering {
@@ -364,25 +368,32 @@ impl Ord for Entry {
     }
 }
 
-/// One destination's delay line: encoded messages waiting for their due
-/// time. A heap rather than a FIFO, so lowering a delay mid-show lets the
-/// new, earlier-due messages out on time instead of behind the old ones.
-#[derive(Default)]
-pub struct DelayLine {
-    heap: BinaryHeap<Entry>,
+/// A delay line: items waiting for their due time. One per destination,
+/// holding encoded messages; and one for the console's websocket feed,
+/// holding its `osc`/`midi` events, so a page gets signals when td does.
+/// A heap rather than a FIFO, so lowering a delay mid-show lets the new,
+/// earlier-due items out on time instead of behind the old ones.
+pub struct DelayLine<T = Vec<u8>> {
+    heap: BinaryHeap<Entry<T>>,
     seq: u64,
     pub dropped: u64,
 }
 
-impl DelayLine {
-    /// Queue `bytes` for `due`; a full line drops and counts.
-    pub fn push(&mut self, due: Instant, bytes: Vec<u8>) {
+impl<T> Default for DelayLine<T> {
+    fn default() -> Self {
+        DelayLine { heap: BinaryHeap::new(), seq: 0, dropped: 0 }
+    }
+}
+
+impl<T> DelayLine<T> {
+    /// Queue `item` for `due`; a full line drops and counts.
+    pub fn push(&mut self, due: Instant, item: T) {
         if self.heap.len() >= DELAY_LINE_CAP {
             self.dropped += 1;
             return;
         }
         self.seq += 1;
-        self.heap.push(Entry { due, seq: self.seq, bytes });
+        self.heap.push(Entry { due, seq: self.seq, item });
     }
 
     pub fn next_due(&self) -> Option<Instant> {
@@ -398,10 +409,10 @@ impl DelayLine {
     }
 
     /// Move everything due at `now` into `out`, earliest first.
-    pub fn pop_due(&mut self, now: Instant, out: &mut Vec<Vec<u8>>) {
+    pub fn pop_due(&mut self, now: Instant, out: &mut impl Extend<T>) {
         while self.heap.peek().is_some_and(|e| e.due <= now) {
             if let Some(e) = self.heap.pop() {
-                out.push(e.bytes);
+                out.extend(std::iter::once(e.item));
             }
         }
     }
