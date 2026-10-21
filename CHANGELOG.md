@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+#### Hot-plug MIDI; the pad on the timeline · 2026-10-21
+
+- **MIDI controllers plugged in while the hub runs are found** within 2 s
+  (`midi: port found: …`). The re-scan was there, but CoreMIDI only
+  refreshes its port list for a thread that runs a run loop; the MIDI
+  thread now makes the process's MIDI client and pumps its run loop.
+- **The hub's gamepad (`/tussen/pad/…`) draws on the console timeline**
+  in the controller row (now *MIDI · pad*): button presses pink and
+  labelled, sticks and triggers as teal ticks. It is MIDI-class now, so
+  the osc tab colours it like MIDI.
+
 #### NDI in, to WebGL · 2026-10-21
 
 - **`[ndi]`**: the hub receives one NDI source (TD's NDI Out TOP, from the

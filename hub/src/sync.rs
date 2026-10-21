@@ -50,9 +50,10 @@ pub enum Class {
     Osc,
 }
 
-/// `/tussen/midi/` and `/tussen/clock/` are MIDI; everything else is OSC.
+/// `/tussen/midi/`, `/tussen/clock/` and the hub's own gamepad
+/// `/tussen/pad/` are MIDI (the controller row); everything else is OSC.
 pub fn class_of(address: &str) -> Class {
-    if address.starts_with("/tussen/midi/") || address.starts_with("/tussen/clock/") {
+    if address.starts_with("/tussen/midi/") || address.starts_with("/tussen/clock/") || address.starts_with("/tussen/pad/") {
         Class::Midi
     } else {
         Class::Osc

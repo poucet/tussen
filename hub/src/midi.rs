@@ -321,16 +321,27 @@ impl Generator for MidiGenerator {
     fn start(&mut self, out: Sender<Message>) -> anyhow::Result<()> {
         let config = self.config.clone();
         let fake = self.fake;
-        // Probe the ports now so a machine with no MIDI client fails
-        // start() visibly (logged; the hub keeps running without us).
-        if fake.is_none() {
-            simply_midi::input::input_ports("simply-tussen")
-                .map_err(|e| anyhow::anyhow!("MIDI unavailable: {e}"))?;
-        }
-        std::thread::Builder::new()
-            .name("simply-tussen midi".into())
-            .spawn(move || run_midi(&config, fake, &out))?;
-        Ok(())
+        // Probe the ports so a machine with no MIDI client fails start()
+        // visibly (logged; the hub keeps running without us). The probe
+        // runs on the MIDI thread itself: CoreMIDI delivers its device
+        // notifications to the run loop of the thread that made the
+        // process's first client, and only that thread pumps one
+        // ([`pump_run_loop`]) — without it, hot-plugged ports never appear.
+        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
+        std::thread::Builder::new().name("simply-tussen midi".into()).spawn(move || {
+            if fake.is_none() {
+                let probe = simply_midi::input::input_ports("simply-tussen").map(|_| ());
+                let failed = probe.is_err();
+                let _ = ready_tx.send(probe.map_err(|e| anyhow::anyhow!("MIDI unavailable: {e}")));
+                if failed {
+                    return;
+                }
+            } else {
+                let _ = ready_tx.send(Ok(()));
+            }
+            run_midi(&config, fake, &out)
+        })?;
+        ready_rx.recv().map_err(|_| anyhow::anyhow!("MIDI thread died"))?
     }
 }
 
@@ -387,6 +398,7 @@ fn run_midi(config: &MidiConfig, fake: Option<u64>, out: &Sender<Message>) {
             }
         } else if now >= next_rescan {
             next_rescan = now + RESCAN_MS;
+            pump_run_loop();
             rescan(config, &tx, &dropped, &mut listeners, &mut open_names);
             let d = dropped.load(Ordering::Relaxed);
             if d > dropped_reported {
@@ -403,6 +415,26 @@ fn run_midi(config: &MidiConfig, fake: Option<u64>, out: &Sender<Message>) {
         }
     }
 }
+
+/// Let CoreMIDI deliver its pending notifications to this thread, so the
+/// port list `rescan` reads includes devices plugged in since the last
+/// one. Returns at once when nothing is pending. A no-op off macOS.
+#[cfg(target_os = "macos")]
+fn pump_run_loop() {
+    use std::ffi::c_void;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFRunLoopDefaultMode: *const c_void;
+        fn CFRunLoopRunInMode(mode: *const c_void, seconds: f64, return_after_source_handled: u8) -> i32;
+    }
+    // SAFETY: a plain CoreFoundation call on this thread's own run loop.
+    unsafe {
+        while CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.0, 1) == 4 /* kCFRunLoopRunHandledSource */ {}
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pump_run_loop() {}
 
 /// Compare the matched port set with what is open; re-open on any
 /// difference (a port appeared, disappeared, or was renamed).

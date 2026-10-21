@@ -155,7 +155,7 @@ const LINK_MODES = ['waiting', 'joined', 'started'];
 const KEEP_US = 30e6;
 const HISTORY_CAP = 5000;           // live-history ring (messages kept for the osc tab)
 const HEAT_MS = 1500;               // how long a wiggled address stays highlighted               // history kept for panning while paused
-const MIDI_PREFIXES = ['/tussen/midi/', '/tussen/clock/'];
+const MIDI_PREFIXES = ['/tussen/midi/', '/tussen/clock/', '/tussen/pad/'];
 
 function signalClass(addr) {
   for (const p of MIDI_PREFIXES) if (addr.startsWith(p)) return 'midi';
@@ -250,6 +250,12 @@ function midiKind(addr, v) {
   if (addr.startsWith('/tussen/midi/cc/')) return 'cc';
   if (addr === '/tussen/clock/onbeat') return 'beat';
   if (addr.startsWith('/tussen/midi/')) return 'ctl';   // bend, pressure, program
+  if (addr.startsWith('/tussen/pad/')) {                // the hub's gamepad
+    const k = addr.slice(12);
+    if (/^(lx|ly|rx|ry|l2|r2)$/.test(k)) return 'padaxis';
+    if (/^[a-z0-9]+$/.test(k) && k !== 'active') return v > 0 ? 'padon' : 'padoff';   // buttons, 0/1
+    return 'clock';                                     // n/…, …/press, active: not drawn
+  }
   return 'clock';                                       // bpm/beat/phase/running: not drawn
 }
 function normRange(r) {
@@ -1218,6 +1224,8 @@ function drawAnchor() {
     else if (e.kind === 'noteoff') { actx.fillStyle = '#8a5d14'; actx.fillRect(x - 0.5, AW_H - 6, 1, 6); }
     else if (e.kind === 'cc') { actx.fillStyle = '#58a6ff'; const hh = 2 + e.v * 8; actx.fillRect(x - 0.5, AW_H - hh, 1, hh); }
     else if (e.kind === 'beat') { actx.fillStyle = '#a371f7'; actx.fillRect(x - 2, AW_H - 3, 4, 3); }
+    else if (e.kind === 'padon') { actx.fillStyle = '#ff6ec7'; actx.fillRect(x - 0.5, AW_H - 14, 1, 14); }
+    else if (e.kind === 'padaxis') { actx.fillStyle = '#2bd4c0'; const hh = 1 + Math.abs(e.v) * 8; actx.fillRect(x - 0.5, AW_H - hh, 1, hh); }
   }
   // the fixed line, dead centre, on top (the anchor is a grid line: x = AWW/2)
   actx.fillStyle = '#be96ff'; actx.fillRect(Math.round(AWW / 2) - 1, 0, 2, AW_H);
@@ -1275,7 +1283,7 @@ function draw() {
   // MIDI
   const my = AXIS_H + AUDIO_H, lanesBottom = H;
   ctx.fillStyle = '#10141a'; ctx.fillRect(0, my, W, MIDI_H);
-  ctx.fillStyle = '#6e7781'; ctx.fillText('MIDI +' + dSig + ' ms (signal delay)', 4, my + 2);
+  ctx.fillStyle = '#6e7781'; ctx.fillText('MIDI · pad +' + dSig + ' ms (signal delay)', 4, my + 2);
   // binary search start in midi array (ts ascending)
   let lo = 0, hi = S.midi.length; while (lo < hi) { const m = (lo + hi) >> 1; if (S.midi[m].ts + sh < t0 - 1e3) lo = m + 1; else hi = m; }
   for (let j = lo; j < S.midi.length; j++) {
@@ -1290,6 +1298,9 @@ function draw() {
     else if (e.kind === 'cc') { ctx.fillStyle = '#58a6ff'; const hh = 2 + e.v * 10; ctx.fillRect(x - 0.5, my + MIDI_H - hh, 1, hh); }
     else if (e.kind === 'beat') { ctx.fillStyle = '#a371f7'; ctx.fillRect(x - 2, my + MIDI_H - 3, 4, 3); }
     else if (e.kind === 'ctl') { ctx.fillStyle = '#3fb950'; ctx.fillRect(x - 0.5, my + MIDI_H - 4, 1, 4); }
+    else if (e.kind === 'padon') { ctx.fillStyle = '#ff6ec7'; ctx.fillRect(x - 0.5, my + 12, 1, MIDI_H - 12); ctx.fillText(e.addr.slice(12), x + 2, my + 24); }
+    else if (e.kind === 'padoff') { ctx.fillStyle = '#8a3b6b'; ctx.fillRect(x - 0.5, my + MIDI_H - 6, 1, 6); }
+    else if (e.kind === 'padaxis') { ctx.fillStyle = '#2bd4c0'; const hh = 1 + Math.abs(e.v) * 10; ctx.fillRect(x - 0.5, my + MIDI_H - hh, 1, hh); }
   }
   // OSC lanes
   S.watch.forEach((addr, li) => {
