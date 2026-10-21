@@ -110,6 +110,77 @@ pub fn encode(fourcc: [u8; 4], width: u32, height: u32, hub_us: u64, rows: impl 
     out
 }
 
+// ---- status, for the console's indicator ------------------------------
+
+/// What the console shows: `GET /ndi/status`.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct Status {
+    /// "off" (not enabled), "error", "looking", "receiving".
+    pub state: String,
+    pub source: String,
+    pub error: String,
+    pub width: u32,
+    pub height: u32,
+    pub fourcc: String,
+    /// Frames received from NDI / sent to pages, per second (last second).
+    pub fps_in: f32,
+    pub fps_out: f32,
+    /// `/ndi` connections open.
+    pub pages: u32,
+    /// Hub-clock age of the newest frame, ms.
+    pub age_ms: u64,
+}
+
+#[derive(Default)]
+struct Counters {
+    status: Status,
+    frames_in: u64,
+    frames_out: u64,
+    last_us: u64,
+    rate_at: (u64, u64, u64),
+}
+
+fn counters() -> &'static Mutex<Counters> {
+    static C: OnceLock<Mutex<Counters>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(Counters { status: Status { state: "off".into(), ..Default::default() }, ..Default::default() }))
+}
+
+fn set_state(state: &str, source: &str, error: &str) {
+    let mut c = counters().lock().unwrap();
+    c.status.state = state.into();
+    c.status.source = source.into();
+    c.status.error = error.into();
+}
+
+/// A page's `/ndi` connection opened (+1) or closed (-1).
+pub fn page(delta: i32) {
+    let mut c = counters().lock().unwrap();
+    c.status.pages = c.status.pages.saturating_add_signed(delta);
+}
+
+/// One frame written to a page.
+pub fn sent() {
+    counters().lock().unwrap().frames_out += 1;
+}
+
+/// The status now; rates over the time since the previous call (≥ 0.5 s).
+pub fn status() -> Status {
+    let now = crate::console::now_us();
+    let mut c = counters().lock().unwrap();
+    let (t0, i0, o0) = c.rate_at;
+    let dt = now.saturating_sub(t0);
+    if dt >= 500_000 {
+        let secs = dt as f32 / 1e6;
+        if t0 != 0 {
+            c.status.fps_in = (c.frames_in - i0) as f32 / secs;
+            c.status.fps_out = (c.frames_out - o0) as f32 / secs;
+        }
+        c.rate_at = (now, c.frames_in, c.frames_out);
+    }
+    c.status.age_ms = if c.last_us == 0 { 0 } else { now.saturating_sub(c.last_us) / 1000 };
+    c.status.clone()
+}
+
 // ---- the NDI runtime, loaded by hand ----------------------------------
 
 #[repr(C)]
@@ -186,6 +257,13 @@ fn candidates(explicit: &str) -> Vec<PathBuf> {
         "/opt/homebrew/lib/libndi.dylib",
         "/usr/lib/libndi.so",
         "/usr/local/lib/libndi.so",
+        // NDI Tools for Mac installs no system library; its apps carry one.
+        "/Applications/NDI Scan Converter.app/Contents/Frameworks/libndi.dylib",
+        "/Applications/NDI Video Monitor.app/Contents/Frameworks/libndi_advanced.dylib",
+        "/Applications/NDI Test Patterns.app/Contents/Frameworks/libndi_advanced.dylib",
+        "/Applications/NDI Discovery.app/Contents/Frameworks/libndi_advanced.dylib",
+        "/Applications/NDI Virtual Input.app/Contents/Frameworks/libndi_advanced.dylib",
+        "/Applications/NDI Router.app/Contents/Frameworks/NTFramework.framework/Versions/A/Frameworks/libndi.dylib",
     ] {
         v.push(PathBuf::from(p));
     }
@@ -295,10 +373,11 @@ pub fn list(cfg: &NdiConfig, wait: Duration) -> anyhow::Result<Vec<String>> {
 /// Start the receiver thread: find the configured source, receive it,
 /// publish every video frame to [`feed`]. Runs for the life of the hub.
 pub fn start(cfg: NdiConfig) -> anyhow::Result<()> {
-    let lib = Lib::load(&cfg.lib)?;
+    let lib = Lib::load(&cfg.lib).inspect_err(|e| set_state("error", "", &format!("{e:#}")))?;
     std::thread::Builder::new().name("simply-tussen ndi".into()).spawn(move || {
         if let Err(e) = receive(&lib, &cfg) {
             log::warn!("ndi: {e:#}");
+            set_state("error", "", &format!("{e:#}"));
         }
     })?;
     Ok(())
@@ -308,6 +387,7 @@ fn receive(lib: &Lib, cfg: &NdiConfig) -> anyhow::Result<()> {
     let finder = Finder::new(lib, &cfg.extra_ips)?;
     let want = if cfg.source.is_empty() { "the first NDI source".to_owned() } else { format!("an NDI source matching {:?}", cfg.source) };
     log::info!("ndi: looking for {want}");
+    set_state("looking", &cfg.source, "");
     let mut warned = false;
     let (name, source) = loop {
         let found = finder.sources(Duration::from_secs(1));
@@ -334,6 +414,7 @@ fn receive(lib: &Lib, cfg: &NdiConfig) -> anyhow::Result<()> {
         bail!("NDIlib_recv_create_v3 failed for {name}");
     }
     log::info!("ndi: receiving {name} → ws://127.0.0.1:<console>/ndi");
+    set_state("receiving", &name, "");
     let mut frames = 0u64;
     loop {
         // SAFETY: an all-zero frame is a valid out-parameter.
@@ -351,6 +432,14 @@ fn receive(lib: &Lib, cfg: &NdiConfig) -> anyhow::Result<()> {
                     let data = unsafe { std::slice::from_raw_parts(v.data, stride * h) };
                     let frame = encode(fourcc, w as u32, h as u32, hub_us, data.chunks(stride));
                     feed().publish(frame);
+                    {
+                        let mut c = counters().lock().unwrap();
+                        c.frames_in += 1;
+                        c.last_us = hub_us;
+                        c.status.width = w as u32;
+                        c.status.height = h as u32;
+                        c.status.fourcc = String::from_utf8_lossy(&fourcc).into_owned();
+                    }
                     if frames == 0 {
                         log::info!("ndi: first frame {w}x{h} {}", String::from_utf8_lossy(&fourcc));
                     }
@@ -361,6 +450,7 @@ fn receive(lib: &Lib, cfg: &NdiConfig) -> anyhow::Result<()> {
             }
             FRAME_ERROR => {
                 log::warn!("ndi: {name} disconnected; waiting for it");
+                set_state("looking", &name, "disconnected");
                 std::thread::sleep(Duration::from_secs(1));
             }
             _ => {}

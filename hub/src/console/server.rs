@@ -128,6 +128,10 @@ fn connection(mut stream: TcpStream, port: u16, inbox: &Sender<ClientMsg>, next_
     }
     match path {
         "/" | "/index.html" => respond(&mut stream, "200 OK", "text/html; charset=utf-8", PAGE)?,
+        "/ndi/status" => {
+            let body = serde_json::to_string(&crate::ndi::status())?;
+            respond_cors(&mut stream, "application/json", &body)?
+        }
         "/ndi.js" => respond_cors(&mut stream, "text/javascript; charset=utf-8", NDI_JS)?,
         "/ndi" => {
             let upgrade = header("upgrade").is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
@@ -195,15 +199,21 @@ fn ndi_feed(mut ws: WebSocket<TcpStream>) -> anyhow::Result<()> {
     ws.get_mut().set_nodelay(true)?;
     ws.get_mut().set_write_timeout(Some(Duration::from_secs(2)))?;
     let feed = crate::ndi::feed();
-    let mut seen = 0;
-    loop {
-        let Some((seq, frame)) = feed.next(seen, Duration::from_secs(1)) else {
-            ws.send(Message::Ping(Vec::new().into()))?;
-            continue;
-        };
-        seen = seq;
-        ws.send(Message::binary(frame.as_slice().to_vec()))?;
-    }
+    crate::ndi::page(1);
+    let result = (|| -> anyhow::Result<()> {
+        let mut seen = 0;
+        loop {
+            let Some((seq, frame)) = feed.next(seen, Duration::from_secs(1)) else {
+                ws.send(Message::Ping(Vec::new().into()))?;
+                continue;
+            };
+            seen = seq;
+            ws.send(Message::binary(frame.as_slice().to_vec()))?;
+            crate::ndi::sent();
+        }
+    })();
+    crate::ndi::page(-1);
+    result
 }
 
 /// One page's session: read its commands, write what the console thread

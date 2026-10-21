@@ -80,6 +80,7 @@ body.tab-osc #oscpage{display:grid;grid-template-columns:minmax(560px,3fr) minma
   <span>window <input id="win" type="number" min="50" max="10000" step="10" value="2000"> ms</span>
   <span>gain <input id="gain" type="number" min="0.25" max="64" step="0.25" value="1"></span>
   <span id="recgrp" hidden><button id="rec" data-title="record a take: every signal, the audio and the Link timeline, from now until Stop (simply-tussen replay plays it back)">● Record</button> <span id="recinfo"></span></span>
+  <span id="ndist" class="pill" hidden title="NDI in ([ndi] in hub.toml): what the hub receives and serves to pages on /ndi"></span>
   <span id="replayst" hidden title="the hub is replaying a take (simply-tussen replay): every signal and the audio come from it"></span>
   <span id="linkgrp" title="Ableton Link: the hub joins the session it hears, or waits with a beat of its own; the grid on the timeline is shifted by the signal delay"><span id="linkst" class="dim" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="who is in the Link session — click for the list">no Link</span><div id="peerdrop" role="dialog" aria-label="Link peers"></div> <input id="bpm" type="number" min="20" max="999" step="0.1" style="width:64px" disabled> bpm <button id="play" disabled>▶ start</button> <button id="linkstart" hidden title="found a Link session now, at this tempo — for when nobody else will join">⊕ start session</button></span>
   <span id="readout" class="dim">—</span>
@@ -868,6 +869,34 @@ function renderRecord() {
 }
 $('#rec').onclick = () => { if (S.record && !S.record.off) sendNow(S.record.on ? L.msg.recordStop() : L.msg.recordStart()); };
 setInterval(renderRecord, 250);
+
+// NDI in: polled from the hub's GET /ndi/status; hidden when [ndi] is off
+// or the page is not served by a hub (mock mode).
+async function renderNdi() {
+  const el = $('#ndist');
+  if (!/^https?:$/.test(location.protocol)) { el.hidden = true; return; }
+  let st;
+  try { st = await (await fetch('/ndi/status', { cache: 'no-store' })).json(); } catch (e) { el.hidden = true; return; }
+  if (!st || st.state === 'off') { el.hidden = true; return; }
+  el.hidden = false;
+  const stale = st.state === 'receiving' && st.age_ms > 2000;
+  let text, cls;
+  if (st.state === 'receiving' && !stale) {
+    text = `NDI ● ${st.width}×${st.height} ${Math.round(st.fps_in)} fps` + (st.pages ? ` → ${st.pages} page${st.pages > 1 ? 's' : ''}` : ' · no page');
+    cls = 'pill ok';
+  } else if (stale) {
+    text = `NDI stalled ${(st.age_ms / 1000).toFixed(0)} s`; cls = 'pill bad';
+  } else if (st.state === 'looking') {
+    text = 'NDI looking…'; cls = 'pill';
+  } else {
+    text = 'NDI error'; cls = 'pill bad';
+  }
+  el.textContent = text;
+  el.className = cls;
+  el.title = [st.source && 'source: ' + st.source, st.fourcc && 'format: ' + st.fourcc, st.pages && `to pages: ${Math.round(st.fps_out)} fps`, st.error].filter(Boolean).join('\n') || 'NDI in';
+}
+renderNdi();
+setInterval(renderNdi, 1000);
 function renderLink() {
   const live = L.linkLive(S, performance.now()), l = latestLink(), n = $('#bpm'), p = $('#play');
   $('#linkst').textContent = L.linkLabel(live ? l : null) + ' ▾';

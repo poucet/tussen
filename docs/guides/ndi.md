@@ -21,7 +21,9 @@ texture to composite in your shaders.
    ```
 
 5. `./simply-tussen run`. The log says `ndi: receiving …` and then
-   `ndi: first frame 1920x1080 UYVY`.
+   `ndi: first frame 1920x1080 UYVY`. The console's top bar shows
+   **NDI ● 1280×720 26 fps → 1 page** (green), *looking…*, *stalled* or
+   *error* (red; hover for why). `GET /ndi/status` is the same as JSON.
 
 ## In the page
 
