@@ -71,7 +71,7 @@ pub fn serve(config_file: ConfigFile, sources: Sources, stats: bool, takes_dir: 
     }
     let replaying = match &sources {
         Sources::Replay { take: which, .. } => {
-            let path = take::resolve(&takes_dir.clone().unwrap_or_default(), which)?;
+            let path = tussen_hub::share::resolve(&takes_dir.clone().unwrap_or_default(), which)?;
             Some(Arc::new(Take::open(&path)?))
         }
         Sources::Live { .. } => None,

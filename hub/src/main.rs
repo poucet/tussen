@@ -54,7 +54,8 @@ enum Command {
     /// destinations, devices, RTP, console), fed from the take instead of
     /// this machine's MIDI, pad, audio and Link. Loops until stopped.
     Replay {
-        /// `latest`, a take's name (or the end of it) in the takes directory, or a path.
+        /// `latest`, a take's name (or the end of it) in the takes directory,
+        /// a path, or a take zip from `export` (imported first).
         take: String,
         /// Loop bars A..B of the recorded timeline (from bar A's first beat to bar B's).
         #[arg(long = "loop", value_name = "A..B", value_parser = parse_bars)]
@@ -83,6 +84,30 @@ enum Command {
     },
     /// The recorded takes: name, date, length, size.
     Takes {
+        #[arg(long)]
+        takes_dir: Option<PathBuf>,
+    },
+    /// Write a take to one .zip to share: every file of the take, as is.
+    Export {
+        /// `latest`, a take's name (or the end of it) in the takes directory, or a path.
+        take: String,
+        /// The zip to write. Default: ./<take>.zip
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Leave the audio out: the signals alone, a fraction of the size
+        /// (the take replays in silence).
+        #[arg(long)]
+        no_audio: bool,
+        /// Where takes live, as for `run`.
+        #[arg(long)]
+        takes_dir: Option<PathBuf>,
+    },
+    /// Unpack a take zip (from `export`) into the takes directory and print
+    /// its name. Never overwrites; a take already there is reused.
+    /// `replay <file.zip>` does this itself.
+    Import {
+        zip: PathBuf,
+        /// Where takes live, as for `run`.
         #[arg(long)]
         takes_dir: Option<PathBuf>,
     },
@@ -173,6 +198,14 @@ fn parse_bars(s: &str) -> Result<(u32, u32), String> {
     Ok((n(a)?, n(b)?))
 }
 
+/// `--takes-dir`, else the default.
+fn takes(takes_dir: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    match takes_dir {
+        Some(d) => Ok(d),
+        None => Env::from_process()?.takes_dir().ok_or_else(|| anyhow::anyhow!("HOME is not set")),
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match Cli::parse().command {
@@ -207,11 +240,11 @@ fn main() -> anyhow::Result<()> {
             };
             cmd::run::serve(config, cmd::run::Sources::Replay { take, opts }, stats, takes_dir.or_else(|| env.takes_dir()))
         }
-        Command::Takes { takes_dir } => {
-            let env = Env::from_process()?;
-            let dir = takes_dir.or_else(|| env.takes_dir()).ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
-            cmd::takes::run(&dir)
+        Command::Takes { takes_dir } => cmd::takes::run(&takes(takes_dir)?),
+        Command::Export { take, output, no_audio, takes_dir } => {
+            cmd::share::export(&takes(takes_dir)?, &take, output, !no_audio)
         }
+        Command::Import { zip, takes_dir } => cmd::share::import(&zip, &takes(takes_dir)?),
         Command::Monitor { port, filter } => cmd::monitor::run(port, filter.as_deref()),
         Command::FakeDevice { name, pattern, hub } => cmd::fake_device::run(&name, pattern, &hub),
         Command::Listen { name, subscribe, hub, port, audio, rtp_port } => {

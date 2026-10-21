@@ -29,6 +29,7 @@ pub mod rdns;
 pub mod record;
 pub mod replay;
 pub mod router;
+pub mod share;
 pub mod sync;
 pub mod take;
 pub mod timing;

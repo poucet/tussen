@@ -49,6 +49,9 @@ gilrs = "0.11.2"
 # Reverse DNS (getnameinfo) for the console's Link peer list: who is
 # behind each peer's address, looked up off-thread (src/rdns.rs).
 dns-lookup = "4"
+# Sharing a take (`export` / `import`, src/share.rs): one .zip. zip-rs
+# with only deflate, over zlib-rs (pure Rust: nothing to build or link).
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Ctrl-C/SIGTERM destroys a live output tap before the hub exits.
 [target.'cfg(target_os = "macos")'.dependencies]

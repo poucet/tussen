@@ -127,10 +127,16 @@ pub struct AudioRecTx {
 }
 
 impl AudioRecTx {
+    /// Whether `block` would be dropped for want of room (tests that
+    /// produce faster than real time wait on it).
+    pub fn would_drop(&self, block: &[f32]) -> bool {
+        self.samples.slots() < block.len() || self.stamps.slots() < 1
+    }
+
     /// One packetized block, stamped `at`. A full ring drops the packet
     /// whole (the next anchor keeps the timing right).
     pub fn push(&mut self, block: &[f32], at: Instant) {
-        if self.samples.slots() < block.len() || self.stamps.slots() < 1 || block.len() != self.frames {
+        if self.would_drop(block) || block.len() != self.frames {
             self.dropped += 1;
             return;
         }
@@ -437,7 +443,7 @@ struct Wav {
     data: u64,
 }
 
-const WAV_HEADER: u64 = 44;
+pub(crate) const WAV_HEADER: u64 = 44;
 
 impl Wav {
     fn create(path: &Path, rate: u32, channels: u16) -> std::io::Result<Wav> {
@@ -468,7 +474,7 @@ impl Wav {
     }
 }
 
-fn wav_header(rate: u32, channels: u16, data: u32) -> [u8; 44] {
+pub(crate) fn wav_header(rate: u32, channels: u16, data: u32) -> [u8; 44] {
     let mut h = [0u8; 44];
     let block = channels * 2;
     h[0..4].copy_from_slice(b"RIFF");
@@ -517,9 +523,7 @@ impl Take {
             &fs::read_to_string(dir.join("take.toml")).with_context(|| format!("{} is not a take", dir.display()))?,
         )
         .context("reading take.toml")?;
-        let mut log = Vec::new();
-        File::open(dir.join("events.bin"))?.read_to_end(&mut log)?;
-        anyhow::ensure!(log.len() >= 10 && &log[..8] == MAGIC, "events.bin: not a take log");
+        let log = fs::read(dir.join("events.bin"))?;
         let mut take = Take {
             dir: dir.to_owned(),
             meta,
@@ -531,16 +535,7 @@ impl Take {
             frames: 0,
             wav: None,
         };
-        let mut i = 10;
-        // A torn last record (a crash mid-write) is shorter than its length: stop there.
-        while i + 4 <= log.len() {
-            let len = u32::from_le_bytes(log[i..i + 4].try_into().unwrap()) as usize;
-            if len < 9 || i + 4 + len > log.len() {
-                break;
-            }
-            let rec = &log[i + 4..i + 4 + len];
-            i += 4 + len;
-            let (kind, t, p) = (rec[0], u64::from_le_bytes(rec[1..9].try_into().unwrap()), &rec[9..]);
+        for (kind, t, p) in Records::new(&log)? {
             take.decode(kind, t, p);
         }
         // Arrival order is time order; a stable sort makes sure of it.
@@ -617,6 +612,18 @@ impl Take {
         Some(f.max(0.0).round() as u64)
     }
 
+    /// The WAV's whole frames as raw L16 interleaved bytes (header
+    /// skipped, a torn last frame left out); None without audio.
+    pub fn audio_bytes(&self) -> anyhow::Result<Option<impl Read>> {
+        let Some(f) = &self.wav else { return Ok(None) };
+        if self.frames == 0 {
+            return Ok(None);
+        }
+        let mut f = f.try_clone()?;
+        f.seek(SeekFrom::Start(WAV_HEADER))?;
+        Ok(Some(std::io::BufReader::new(f).take(self.frames * self.meta.channels.max(1) as u64 * 2)))
+    }
+
     /// Read interleaved samples from `frame` into `out` (zeros past the end).
     pub fn read_audio(&self, frame: u64, out: &mut [f32]) {
         out.fill(0.0);
@@ -642,6 +649,42 @@ impl Take {
                 *o = i16::from_le_bytes([b[0], b[1]]) as f32 / 32767.0;
             }
         }
+    }
+}
+
+/// The records of an event log, in file order: `(kind, t, payload)`.
+pub struct Records<'a> {
+    log: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Records<'a> {
+    /// Checks the header; iteration starts after it.
+    pub fn new(log: &'a [u8]) -> anyhow::Result<Records<'a>> {
+        anyhow::ensure!(log.len() >= 10 && &log[..8] == MAGIC, "events.bin: not a take log");
+        Ok(Records { log, at: 10 })
+    }
+
+    /// Bytes up to the end of the last record read: after the iterator is
+    /// exhausted, the whole records (a torn tail left out).
+    pub fn end(&self) -> usize {
+        self.at
+    }
+}
+
+impl<'a> Iterator for Records<'a> {
+    type Item = (u8, u64, &'a [u8]);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (log, i) = (self.log, self.at);
+        // A torn last record (a crash mid-write) is shorter than its length: stop there.
+        let len = u32::from_le_bytes(log.get(i..i + 4)?.try_into().unwrap()) as usize;
+        if len < 9 || i + 4 + len > log.len() {
+            return None;
+        }
+        let rec = &log[i + 4..i + 4 + len];
+        self.at = i + 4 + len;
+        Some((rec[0], u64::from_le_bytes(rec[1..9].try_into().unwrap()), &rec[9..]))
     }
 }
 
@@ -678,7 +721,7 @@ pub fn dir_name(now: SystemTime, name: Option<&str>) -> String {
     }
 }
 
-fn sanitize(name: &str) -> String {
+pub(crate) fn sanitize(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect()
 }
 

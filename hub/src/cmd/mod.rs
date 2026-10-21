@@ -6,6 +6,7 @@ pub mod listen;
 pub mod monitor;
 pub mod run;
 pub mod sdp;
+pub mod share;
 pub mod takes;
 
 use std::net::{SocketAddr, ToSocketAddrs};
