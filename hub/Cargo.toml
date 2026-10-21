@@ -14,10 +14,10 @@ name = "simply-tussen"
 path = "src/main.rs"
 
 [dependencies]
-simply-osc = { git = "https://github.com/poucet/music-rs.git", tag = "v1.0.0" }
-simply-midi = { git = "https://github.com/poucet/music-rs.git", tag = "v1.0.0", features = ["device"] }
+simply-osc = { git = "https://github.com/poucet/music-rs.git", tag = "v1.0.1" }
+simply-midi = { git = "https://github.com/poucet/music-rs.git", tag = "v1.0.1", features = ["device"] }
 # Ableton Link: the hub joins the session and leads it (tempo, start/stop).
-simply-link = { git = "https://github.com/poucet/music-rs.git", tag = "v1.0.0" }
+simply-link = { git = "https://github.com/poucet/music-rs.git", tag = "v1.0.1" }
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
 serde = { version = "1", features = ["derive"] }

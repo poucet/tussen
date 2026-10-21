@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+#### Replay audio survives a Link storm · 2026-10-21
+
+- **Fixed: replay/RTP audio dropped ~45 % of its packets** while hubs on
+  one LAN were caught in a Link multicast storm (two crossing tempo changes
+  traded timelines forever, ~10 000 `alive` multicasts a second per hub).
+  Fixed upstream in `simply-link` 1.0.1; the hub now builds against
+  music-rs `v1.0.1`. Restart every hub on the LAN on the new build.
+
 #### Who is reached: destination status in the console · 2026-10-21
 
 - **The console's dests table has a status column**, and the top bar a

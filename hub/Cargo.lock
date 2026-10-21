@@ -1435,8 +1435,8 @@ dependencies = [
 
 [[package]]
 name = "simply-link"
-version = "1.0.0"
-source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.0#bd268fe1a6b5be1c673739e816c4f082ca20193b"
+version = "1.0.1"
+source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.1#90b2d3c16300e1232398d913f1c210c27773a9ff"
 dependencies = [
  "if-addrs",
  "socket2",
@@ -1444,8 +1444,8 @@ dependencies = [
 
 [[package]]
 name = "simply-midi"
-version = "1.0.0"
-source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.0#bd268fe1a6b5be1c673739e816c4f082ca20193b"
+version = "1.0.1"
+source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.1#90b2d3c16300e1232398d913f1c210c27773a9ff"
 dependencies = [
  "midir",
  "simply-midi-clock",
@@ -1453,13 +1453,13 @@ dependencies = [
 
 [[package]]
 name = "simply-midi-clock"
-version = "1.0.0"
-source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.0#bd268fe1a6b5be1c673739e816c4f082ca20193b"
+version = "1.0.1"
+source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.1#90b2d3c16300e1232398d913f1c210c27773a9ff"
 
 [[package]]
 name = "simply-osc"
-version = "1.0.0"
-source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.0#bd268fe1a6b5be1c673739e816c4f082ca20193b"
+version = "1.0.1"
+source = "git+https://github.com/poucet/music-rs.git?tag=v1.0.1#90b2d3c16300e1232398d913f1c210c27773a9ff"
 
 [[package]]
 name = "simply-tussen"
