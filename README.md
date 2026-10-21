@@ -155,7 +155,9 @@ sync delays apply as set, so it can drive TouchDesigner and the devices
 end to end. To hear it, add a local output destination to hub.toml
 (`[[dest]]` with `audio_out = ""` for the default output). It plays in
 `replay` only unless its `modes` says otherwise (`modes = ["run"]` for
-live headphones).
+live headphones). `./simply-tussen export latest` packs a take into one
+zip to share (`--no-audio` for the signals alone), and
+`replay <file.zip>` plays one from anywhere.
 Guide: [docs/guides/record-and-replay.md](docs/guides/record-and-replay.md).
 
 ## Reading the signals from your own code

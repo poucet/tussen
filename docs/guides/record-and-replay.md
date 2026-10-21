@@ -77,7 +77,7 @@ simply-tussen replay <take> [--loop A..B] [--from BAR] [--offset-ms N]
 
 | | |
 |---|---|
-| `<take>` | `latest`, a take's folder name, the end of one (`rehearsal`), or a path |
+| `<take>` | `latest`, a take's folder name, the end of one (`rehearsal`), a path, or a take zip from anywhere ([below](#sharing-a-take)) |
 | `--loop A..B` | loop whole bars of the recorded Link timeline: from bar A's first beat to bar B's (`9..17` is 8 bars). Without it, the whole take loops |
 | `--from BAR` | start at bar BAR (then loop as above) |
 | `--offset-ms N` | a manual nudge: play the audio N ms ahead of the signals (negative: later). Default 0 |
@@ -238,10 +238,42 @@ One folder per take, in `~/Music/tussen/takes/` (or
 - A replay holds the take's event log in memory: fine for rehearsals,
   heavy for hours-long takes.
 
+## Sharing a take
+
+```sh
+./simply-tussen export latest                  # → ./2026-10-20T21-14-03-rehearsal.zip
+./simply-tussen export rehearsal -o ~/Desktop/rehearsal.zip
+./simply-tussen export rehearsal --no-audio    # the signals alone
+
+./simply-tussen import ~/Downloads/rehearsal.zip   # into the takes folder; prints its name
+./simply-tussen replay ~/Downloads/rehearsal.zip   # imports it, then replays it
+```
+
+`export` writes one zip holding the take's files as they are
+(`audio.wav` stored, the rest deflated), plus a small `tussen-take.toml`
+that marks it as a take, and prints its size. Audio is not compressed:
+the zip is about the take's size, ~11.5 MB a minute at 48 kHz stereo, so
+share it through Drive or similar. `--no-audio` leaves `audio.wav` out:
+the signals alone, about 90 kB a minute for a rehearsal, replayed in
+silence.
+
+**Importing.** `import`, and `replay` given a `.zip`, unpack it into the
+takes folder as an ordinary take, every file byte for byte. A zip whose
+`take.toml` matches a take already there, with audio the same way, is
+that take: it is reused, not copied again, so `replay` on the same zip
+twice imports once. A different take with a name already in use gets
+`-2`, `-3`, and so on. Nothing is overwritten. A zip that isn't a take,
+comes from a newer format, or holds any other file is refused before
+anything is written.
+
+A take still recording, or cut off by a crash, exports what it holds:
+the whole events and audio frames up to its last flush, with a WAV header
+to match.
+
 ## Later
 
 - Console transport: play and pause, a take list, a draggable loop.
 - Live pads played over a replay.
-- Smaller, shareable takes: compression, FLAC, trimming, anonymised
-  exports.
+- Smaller shared takes: trimming to bars on export, anonymised sender
+  addresses.
 - Always-on recording of the last N minutes.

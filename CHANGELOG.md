@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+#### Share a take as one zip · 2026-10-21 07:34 · yklrmwpl
+
+- **`simply-tussen export <take> [-o FILE] [--no-audio]`** writes a take as
+  one zip: its files as they are (`audio.wav` stored, the rest deflated)
+  plus a `tussen-take.toml` manifest (format 1), and prints the size.
+  Audio is not compressed. `--no-audio` leaves it out; such a take replays
+  its signals in silence.
+- **`simply-tussen import <file.zip>`** unpacks into the takes folder as an
+  ordinary take, byte-identical, and prints its name. **`replay
+  <file.zip>`** imports, then replays. A zip whose `take.toml` matches a
+  take already there (audio the same way) is reused. A name in use gets
+  `-2`, `-3`, … Nothing is overwritten. Any other entry (zip-slip
+  included), a missing manifest or another format is refused before
+  anything is written.
+- A take still recording, or crash-truncated, exports its whole events and
+  frames, as replay would open it.
+- New dependency: `zip` (deflate only, over zlib-rs; pure Rust).
+
 #### Destinations say which modes they're active in · 2026-10-20 02:40 · molpnvrq
 
 - **`modes = ["run", "replay"]` on any `[[dest]]`.** Without it, a
