@@ -37,6 +37,9 @@
   "*"`), every address used to grow one nobody draws. The history still
   gets every message. A lane you add starts empty, and a lane you remove
   drops its data.
+- **The osc tab's history keeps the latest 500 messages, not 5,000.** It
+  is there to see what just arrived, not to scroll back through; it still
+  shows the newest 300.
 - The "ago" columns no longer spread the whole address list into
   `Math.max`, which throws past ~100k addresses.
 - Measured on a live hub: recording changes neither the hub's

@@ -293,7 +293,7 @@ ok(run.S.oscEndpoint && run.S.oscEndpoint.port === 9000 && run.S.oscEndpoint.ips
   ok(rows.length === 2 && rows[0].addr === '/tussen/midi/cc/1', 'newest first');
   ok(L.historyRows(Sh, 'DJAY', 10).length === 1 && L.historyRows(Sh, 'nope', 10).length === 0, 'filter is case-insensitive substring');
   for (let i = 0; i < L.HISTORY_CAP + 2000; i++) L.applyMessage(Sh, { t: 'osc', ts: 10 + i, addr: '/x', v: i, src: 's' }, 0);
-  ok(Sh.history.buf.length <= L.HISTORY_CAP + 512 && Sh.history.total === L.HISTORY_CAP + 2002, 'ring capped, total keeps counting', Sh.history.buf.length);
+  ok(Sh.history.buf.length <= L.HISTORY_CAP + L.HISTORY_SLACK && L.HISTORY_CAP <= 500 && Sh.history.total === L.HISTORY_CAP + 2002, 'ring capped, total keeps counting', Sh.history.buf.length);
   ok(L.historyRows(Sh, '', 5).length === 5 && L.historyRows(Sh, '', 5)[0].v === L.HISTORY_CAP + 1999, 'limit + newest kept');
 }
 { // a lane's series: only watched addresses get one, and trimming is batched —

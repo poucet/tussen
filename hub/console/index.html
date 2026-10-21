@@ -158,7 +158,8 @@ const FOLLOWS = ['td', 'music'];
 const TEMPO_MIN = 20, TEMPO_MAX = 999, LINK_KEEP = 200, LINK_STALE_MS = 2000;
 const LINK_MODES = ['waiting', 'joined', 'started'];
 const KEEP_US = 30e6;
-const HISTORY_CAP = 5000;           // live-history ring (messages kept for the osc tab)
+const HISTORY_CAP = 500;            // live-history ring: the osc tab shows recent messages, not an archive
+const HISTORY_SLACK = 64;           // ring may overshoot by this much before one splice (amortized)
 const HEAT_MS = 1500;               // how long a wiggled address stays highlighted               // history kept for panning while paused
 const MIDI_PREFIXES = ['/tussen/midi/', '/tussen/clock/', '/tussen/pad/'];
 
@@ -341,7 +342,7 @@ function createState() {
 function histPush(s, e) {
   const h = s.history;
   e.n = h.total++; h.buf.push(e);   // n: the message's number, a history row's key
-  if (h.buf.length > HISTORY_CAP + 512) h.buf.splice(0, h.buf.length - HISTORY_CAP);
+  if (h.buf.length > HISTORY_CAP + HISTORY_SLACK) h.buf.splice(0, h.buf.length - HISTORY_CAP);
 }
 // Newest first, filtered by address substring, at most `limit` rows.
 function historyRows(s, filter, limit) {
@@ -964,7 +965,7 @@ const api = {
   signalClass, clampDelay, signalDelayMs, audioDelayMs, shiftTs,
   timeToX, xToTime, zoomView, gridStepMs, blockDurUs,
   AudioRing, midiKind, createState, resetBuffers, applyMessage, sortedAddrs, isHot, HEAT_MS, matchPattern,
-  HISTORY_CAP, histPush, historyRows, latestSeenTs, esc, fmtV, addrRow, seenRow, histRow, patchRows, renderPlan, seenRows, endpointText, endpointLines,
+  HISTORY_CAP, HISTORY_SLACK, histPush, historyRows, latestSeenTs, esc, fmtV, addrRow, seenRow, histRow, patchRows, renderPlan, seenRows, endpointText, endpointLines,
   DEST_STATES, DEST_STATUS_STALE_MS, normDestStatus, destStatusCell, destSummary,
   msg, isTempId, parseRuleForm, applyLocalEdit, detectOnsets, alignStats, beatAnchor, createMockHub,
 };
